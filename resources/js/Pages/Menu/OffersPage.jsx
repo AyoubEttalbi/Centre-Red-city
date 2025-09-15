@@ -83,14 +83,14 @@ export default function OffersPage({
     const incrementPercentage = (offerId, subject) => {
         setEditData((prev) => {
             const currentValue =
-                Number.parseInt(prev[offerId].percentage[subject]) || 0;
+                Number.parseFloat(prev[offerId].percentage[subject]) || 0;
             return {
                 ...prev,
                 [offerId]: {
                     ...prev[offerId],
                     percentage: {
                         ...prev[offerId].percentage,
-                        [subject]: Math.min(100, currentValue + 1),
+                        [subject]: Math.min(100, Number((currentValue + 1).toFixed(6))),
                     },
                 },
             };
@@ -100,14 +100,14 @@ export default function OffersPage({
     const decrementPercentage = (offerId, subject) => {
         setEditData((prev) => {
             const currentValue =
-                Number.parseInt(prev[offerId].percentage[subject]) || 0;
+                Number.parseFloat(prev[offerId].percentage[subject]) || 0;
             return {
                 ...prev,
                 [offerId]: {
                     ...prev[offerId],
                     percentage: {
                         ...prev[offerId].percentage,
-                        [subject]: Math.max(0, currentValue - 1),
+                        [subject]: Math.max(0, Number((currentValue - 1).toFixed(6))),
                     },
                 },
             };
