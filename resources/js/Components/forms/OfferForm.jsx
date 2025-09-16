@@ -58,10 +58,10 @@ const OfferForm = ({ type, data, setOpen, subjects, levels }) => {
         }
     };
     const handlePercentageChange = (subject, value) => {
-        // Allow decimals, clamp to [0,100], keep up to 6 decimals
+        // Allow unlimited decimals, clamp to [0,100]
         let next = value === "" ? "" : Number.parseFloat(value);
         if (Number.isFinite(next)) {
-            next = Math.max(0, Math.min(100, Number(next.toFixed(6))));
+            next = Math.max(0, Math.min(100, next));
         }
         setPercentages((prev) => ({
             ...prev,
@@ -183,7 +183,7 @@ const OfferForm = ({ type, data, setOpen, subjects, levels }) => {
                                         placeholder="%"
                                         min={0}
                                         max={100}
-                                        step={0.000001}
+                                        step="any"
                                         className="w-20 p-1 border border-gray-300 rounded-md text-sm text-center focus:outline-none focus:ring-2 focus:ring-blue-500"
                                     />
                                 )}

@@ -90,7 +90,7 @@ export default function OffersPage({
                     ...prev[offerId],
                     percentage: {
                         ...prev[offerId].percentage,
-                        [subject]: Math.min(100, Number((currentValue + 1).toFixed(6))),
+                        [subject]: Math.min(100, currentValue + 1),
                     },
                 },
             };
@@ -107,7 +107,7 @@ export default function OffersPage({
                     ...prev[offerId],
                     percentage: {
                         ...prev[offerId].percentage,
-                        [subject]: Math.max(0, Number((currentValue - 1).toFixed(6))),
+                        [subject]: Math.max(0, currentValue - 1),
                     },
                 },
             };

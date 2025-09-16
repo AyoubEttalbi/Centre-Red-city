@@ -349,12 +349,7 @@ const InvoicesTable = ({
                             <p className="mb-4">
                                 Aucune facture trouvée. Créez une facture pour compléter le paiement de l'adhésion.
                             </p>
-                            <FormModal
-                                table="invoice"
-                                type="create"
-                                StudentMemberships={Student_memberships}
-                                studentId={studentId}
-                            />
+                            
                         </div>
                     ) : (
                         <p>Aucune facture trouvée.</p>

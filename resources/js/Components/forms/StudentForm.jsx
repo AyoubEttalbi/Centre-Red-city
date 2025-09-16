@@ -147,9 +147,9 @@ const StudentForm = ({ type, data, levels, classes, schools, setOpen }) => {
         data?.status || "active",
     );
     const [selectedAssurance, setSelectedAssurance] = useState(
-        data?.assurance === 1 ? "1" : "0",
+        data?.assurance === 1 ? "1" : data?.assurance === "1" ? "1" : "0",
     );
-    const [assuranceAmount, setAssuranceAmount] = useState(data?.assuranceAmount || "");
+    const [assuranceAmount, setAssuranceAmount] = useState(data?.assuranceAmount?.toString() || "");
     const [selectedHasDisease, setSelectedHasDisease] = useState(
         data?.hasDisease === 1 ? "1" : "0",
     );
@@ -182,8 +182,8 @@ const StudentForm = ({ type, data, levels, classes, schools, setOpen }) => {
         resolver: zodResolver(schema),
         defaultValues: {
             billingDate: defaultBillingDate,
-            assurance: data?.assurance === 1 ? "1" : "0",
-            assuranceAmount: data?.assuranceAmount || "",
+            assurance: data?.assurance === 1 ? "1" : data?.assurance === "1" ? "1" : "0",
+            assuranceAmount: data?.assuranceAmount?.toString() || "",
             status: data?.status || "active",
             hasDisease: data?.hasDisease === 1 ? "1" : "0",
             diseaseName:
@@ -221,8 +221,8 @@ const StudentForm = ({ type, data, levels, classes, schools, setOpen }) => {
             setSelectedClass(data.classId?.toString());
             setSelectedSchool(data.schoolId?.toString());
             setSelectedStatus(data.status);
-            setSelectedAssurance(data.assurance === 1 ? "1" : "0");
-            setAssuranceAmount(data.assuranceAmount || "");
+            setSelectedAssurance(data.assurance === 1 ? "1" : data.assurance === "1" ? "1" : "0");
+            setAssuranceAmount(data.assuranceAmount?.toString() || "");
             setSelectedHasDisease(data.hasDisease === 1 ? "1" : "0");
 
             // Set image preview if exists

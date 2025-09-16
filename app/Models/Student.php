@@ -104,7 +104,40 @@ class Student extends Model
             }
         });
 
-        // Update class student count when a student is deleted
+        // Cascade delete related data and update class count when a student is deleted
+        static::deleting(function ($student) {
+            // If soft deleting, soft delete memberships and invoices. If force deleting, force delete them.
+            $isForceDeleting = method_exists($student, 'isForceDeleting') && $student->isForceDeleting();
+
+            // Delete memberships for this student
+            $student->memberships()->withTrashed()->get()->each(function ($membership) use ($isForceDeleting) {
+                if ($isForceDeleting) {
+                    $membership->forceDelete();
+                } else {
+                    if ($membership->trashed()) return; // already soft-deleted
+                    $membership->delete();
+                }
+            });
+
+            // Delete invoices directly tied to this student (regardless of membership linkage)
+            \App\Models\Invoice::withTrashed()->where('student_id', $student->id)->get()->each(function ($invoice) use ($isForceDeleting) {
+                // Before deletion, apply teacher wallet reversal rules
+                try {
+                    $service = new \App\Services\TeacherMembershipPaymentService();
+                    $service->reverseInvoicePayments($invoice);
+                } catch (\Exception $e) {
+                    // Continue with deletion even if reversal fails, but log the error if logging is available
+                }
+                if ($isForceDeleting) {
+                    $invoice->forceDelete();
+                } else {
+                    if ($invoice->trashed()) return; // already soft-deleted
+                    $invoice->delete();
+                }
+            });
+        });
+
+        // After deletion, update the class student count
         static::deleted(function ($student) {
             $class = Classes::find($student->classId);
             if ($class) {

@@ -590,6 +590,9 @@ class TeacherMembershipPaymentService
 
     /**
      * Reverse teacher payments when an invoice is updated or deleted
+     * Business rules provided by client:
+     * - Multi-month invoices: if within 10 days of billing, decrement ALL months (current + future); if after 10 days, only decrement future months, keep current month.
+     * - Single-month invoices: if current month and within 10 days after billing date, decrement the amount; otherwise do not decrement.
      */
     public function reverseInvoicePayments(Invoice $invoice, array $oldData = null)
     {
@@ -598,21 +601,25 @@ class TeacherMembershipPaymentService
             return;
         }
 
-        // Find all active records for this membership
+        $currentMonth = now()->format('Y-m');
+        $billingDate = $invoice->billDate;
+        $daysSinceBilling = $billingDate ? now()->diffInDays($billingDate) : 999; // If no billing date, treat as expired
+
+        // Find all active records for this membership and invoice
         $records = TeacherMembershipPayment::active()
             ->where('membership_id', $membership->id)
             ->where('invoice_id', $invoice->id)
             ->get();
 
         foreach ($records as $record) {
-            $this->reverseTeacherPayment($record, $invoice);
+            $this->reverseTeacherPayment($record, $invoice, $currentMonth, $daysSinceBilling);
         }
     }
 
     /**
-     * Reverse a specific teacher payment record
+     * Reverse a specific teacher payment record based on client rules
      */
-    private function reverseTeacherPayment(TeacherMembershipPayment $record, Invoice $invoice)
+    private function reverseTeacherPayment(TeacherMembershipPayment $record, Invoice $invoice, string $currentMonth, int $daysSinceBilling)
     {
         try {
             $teacher = Teacher::find($record->teacher_id);
@@ -621,63 +628,109 @@ class TeacherMembershipPaymentService
                 return;
             }
 
-            // SIMPLIFIED LOGIC: Use total_paid_to_teacher field
-            // This field tracks ALL amounts paid to teacher (immediate + monthly)
-            $amountToReverse = round((float)($record->total_paid_to_teacher ?? 0), 2);
-            
-            // Debug logging for reversal calculation
-            Log::info('Reversal calculation debug', [
+            $selectedMonths = $record->selected_months ?? [];
+            sort($selectedMonths);
+            $monthsCount = count($selectedMonths);
+
+            // Default: do not decrement, only stop future months
+            $shouldDecrement = false;
+            $amountToReverse = 0.0;
+
+            if ($monthsCount <= 1) {
+                // Single-month logic
+                $onlyMonth = $monthsCount === 1 ? $selectedMonths[0] : null;
+                if ($onlyMonth) {
+                    if ($onlyMonth === $currentMonth) {
+                        // Current month: allow decrement only within 10 days after billing date
+                        if ($daysSinceBilling <= 10) {
+                            $shouldDecrement = true;
+                            // Reverse whatever was paid to teacher for this invoice (immediate for single month)
+                            $amountToReverse = round((float)($record->total_paid_to_teacher ?? 0), 2);
+                        }
+                    } elseif ($onlyMonth > $currentMonth) {
+                        // Future month: no decrement, just stop it
+                        $shouldDecrement = false;
+                    } else {
+                        // Past month: do not decrement
+                        $shouldDecrement = false;
+                    }
+                }
+            } else {
+                // Multi-month logic: apply 10-day rule
+                $futureMonths = array_filter($selectedMonths, function($month) use ($currentMonth) {
+                    return $month > $currentMonth;
+                });
+                $currentMonthIncluded = in_array($currentMonth, $selectedMonths);
+                
+                if ($daysSinceBilling <= 10) {
+                    // Within 10 days: decrement ALL months (current + future)
+                    $shouldDecrement = true;
+                    $amountToReverse = round((float)($record->total_paid_to_teacher ?? 0), 2);
+                } else {
+                    // After 10 days: only decrement future months, keep current month
+                    if (count($futureMonths) > 0) {
+                        $shouldDecrement = true;
+                        // Calculate amount for future months only
+                        $totalAmount = round((float)($record->total_teacher_amount ?? 0), 2);
+                        $allMonthsCount = count($selectedMonths);
+                        $futureMonthsCount = count($futureMonths);
+                        $amountToReverse = round(($totalAmount / $allMonthsCount) * $futureMonthsCount, 2);
+                    } else {
+                        // No future months to decrement
+                        $shouldDecrement = false;
+                    }
+                }
+            }
+
+            Log::info('Reversal decision', [
                 'record_id' => $record->id,
                 'teacher_id' => $teacher->id,
-                'total_paid_to_teacher_record' => round((float)($record->total_paid_to_teacher ?? 0), 2),
-                'immediate_wallet_amount_record' => round((float)($record->immediate_wallet_amount ?? 0), 2),
-                'monthly_teacher_amount_record' => round((float)($record->monthly_teacher_amount ?? 0), 2),
-                'selected_months' => $record->selected_months,
-                'months_rest_not_paid_yet' => $record->months_rest_not_paid_yet,
-                'amount_to_reverse_calculated' => $amountToReverse,
+                'selected_months' => $selectedMonths,
+                'months_count' => $monthsCount,
+                'current_month' => $currentMonth,
+                'days_since_billing' => $daysSinceBilling,
+                'billing_date' => $invoice->billDate?->format('Y-m-d'),
+                'should_decrement' => $shouldDecrement,
+                'calculated_amount_to_reverse' => $amountToReverse,
+                'reversal_rule' => $monthsCount <= 1 ? 'single_month' : 'multi_month',
+                'future_months_count' => $monthsCount > 1 ? count($futureMonths) : 0,
+                'current_month_included' => $monthsCount > 1 ? $currentMonthIncluded : null,
             ]);
 
-            if ($amountToReverse > 0) {
+            if ($shouldDecrement && $amountToReverse > 0) {
                 $teacherWalletBefore = round((float)($teacher->wallet), 2);
-                // Decrement teacher wallet
                 $teacher->decrement('wallet', $amountToReverse);
-
-                Log::info('Reversed teacher payment due to invoice deletion', [
+                Log::info('Decremented teacher wallet due to allowed reversal', [
                     'record_id' => $record->id,
                     'teacher_id' => $teacher->id,
-                    'teacher_name' => $teacher->first_name . ' ' . $teacher->last_name,
                     'invoice_id' => $invoice->id,
-                    'total_paid_to_teacher_on_record' => $record->total_paid_to_teacher ?? 0,
-                    'total_amount_reversed' => $amountToReverse,
+                    'amount_reversed' => $amountToReverse,
                     'wallet_before_op' => $teacherWalletBefore,
                     'wallet_after_op' => round((float)($teacher->wallet), 2),
-                    'expected_wallet_after' => round(($teacherWalletBefore - $amountToReverse), 2),
                 ]);
             }
 
-            // Deactivate the record
-            $record->update(['is_active' => false]);
-            
-            Log::info('Deactivated teacher membership payment record', [
+            // Stop future months: deactivate record and clear remaining unpaid months
+            $record->update([
+                'is_active' => false,
+                'months_rest_not_paid_yet' => [],
+            ]);
+
+            Log::info('Deactivated teacher membership payment record and cleared unpaid months', [
                 'record_id' => $record->id,
                 'teacher_id' => $teacher->id,
                 'invoice_id' => $invoice->id
             ]);
-            
+
         } catch (\Exception $e) {
-            // Log the error and DO NOT decrement wallet
-            Log::error('Error reversing teacher payment - wallet NOT decremented', [
+            Log::error('Error reversing teacher payment', [
                 'record_id' => $record->id,
                 'teacher_id' => $record->teacher_id,
                 'invoice_id' => $invoice->id,
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
             ]);
-            
-            // Still deactivate the record to prevent further issues
             try {
                 $record->update(['is_active' => false]);
-                Log::info('Record deactivated despite reversal error', ['record_id' => $record->id]);
             } catch (\Exception $deactivationError) {
                 Log::error('Failed to deactivate record after reversal error', [
                     'record_id' => $record->id,
