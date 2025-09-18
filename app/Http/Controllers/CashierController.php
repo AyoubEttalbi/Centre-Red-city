@@ -15,15 +15,24 @@ use Inertia\Inertia;
 
 class CashierController extends Controller
 {
-    // Fetch daily statistics for the cashier page
+    // Fetch statistics for the cashier page (daily by default, supports monthly via view=monthly)
     public function daily(Request $request)
     {
-        // Use today's date if no date is provided
-$date = $request->input('date');
-if (empty($date)) {
-    $date = Carbon::today()->toDateString();
-}
-    
+        // Determine view mode
+        $view = $request->input('view', 'daily'); // 'daily' | 'monthly'
+
+        // Resolve date/month inputs with sensible defaults
+        $date = $request->input('date');
+        $month = $request->input('month'); // format: YYYY-MM
+        if ($view === 'daily') {
+            if (empty($date)) {
+                $date = Carbon::today()->toDateString();
+            }
+        } else {
+            if (empty($month)) {
+                $month = Carbon::today()->format('Y-m');
+            }
+        }
 
         $user = auth()->user();
         $isAssistant = $user && $user->role === 'assistant';
@@ -38,8 +47,17 @@ if (empty($date)) {
         $query = Invoice::with(['student', 'creator', 'membership' => function($membershipQuery) {
                 $membershipQuery->withTrashed()->with('offer');
             }])
-            ->whereDate('created_at', $date)
             ->where('amountPaid', '>', 0);
+
+        if ($view === 'daily') {
+            $query->whereDate('created_at', $date);
+        } else {
+            // monthly: filter between first and last day of the month
+            [$year, $monthNum] = array_map('intval', explode('-', $month));
+            $startOfMonth = Carbon::create($year, $monthNum, 1)->startOfDay();
+            $endOfMonth = Carbon::create($year, $monthNum, 1)->endOfMonth()->endOfDay();
+            $query->whereBetween('created_at', [$startOfMonth, $endOfMonth]);
+        }
 
         // If assistant, filter invoices by related schools
         if ($isAssistant && count($assistantSchoolIds) > 0) {
@@ -83,60 +101,75 @@ if (empty($date)) {
         $totalInvoices = $allFilteredInvoices->count();
         $averagePayment = $totalInvoices > 0 ? $totalPaid / $totalInvoices : 0;
         
-        // Find peak hour from all filtered invoices
-        $hourlyData = $allFilteredInvoices->groupBy(function ($invoice) {
-            return $invoice->created_at->format('H');
-        })->map(function ($invoices, $hour) {
-            return [
-                'hour' => (int) $hour,
-                'total' => $invoices->sum('amountPaid')
-            ];
-        });
-        $peakHour = $hourlyData->sortByDesc('total')->first() ?? ['hour' => 0, 'total' => 0];
+        // Build chart data and peak period based on view
+        if ($view === 'daily') {
+            // hourly aggregation for a single day
+            $hourlyData = $allFilteredInvoices->groupBy(function ($invoice) {
+                return $invoice->created_at->format('H');
+            })->map(function ($invoices, $hour) {
+                return [
+                    'hour' => (int) $hour,
+                    'total' => $invoices->sum('amountPaid')
+                ];
+            });
+            $peakPeriod = $hourlyData->sortByDesc('total')->first() ?? ['hour' => 0, 'total' => 0];
+        } else {
+            // daily aggregation within the month
+            $dailyData = $allFilteredInvoices->groupBy(function ($invoice) {
+                return $invoice->created_at->format('Y-m-d');
+            })->map(function ($invoices, $day) {
+                return [
+                    'day' => $day,
+                    'dayNumber' => (int) Carbon::parse($day)->format('d'),
+                    'total' => $invoices->sum('amountPaid')
+                ];
+            });
+            $peakPeriod = $dailyData->sortByDesc('total')->first() ?? ['day' => Carbon::today()->toDateString(), 'dayNumber' => 0, 'total' => 0];
+        }
         
-        // Calculate previous day total for trend comparison
-        $previousDate = Carbon::parse($date)->subDay()->toDateString();
-        $previousDayQuery = Invoice::whereDate('created_at', $previousDate)
-            ->where('amountPaid', '>', 0);
-        
-        // Apply same filters to previous day query
-        if ($isAssistant && count($assistantSchoolIds) > 0) {
-            $previousDayQuery->whereHas('student', function ($studentQuery) use ($assistantSchoolIds) {
-                $studentQuery->whereIn('schoolId', $assistantSchoolIds);
-            });
+        // Calculate previous period total for trend comparison
+        if ($view === 'daily') {
+            $previousDate = Carbon::parse($date)->subDay()->toDateString();
+            $previousPeriodQuery = Invoice::whereDate('created_at', $previousDate)
+                ->where('amountPaid', '>', 0);
+            $previousPeriodTotal = $previousPeriodQuery->sum('amountPaid');
+            $previousMonthTotal = null; // Not needed in daily view
+        } else {
+            [$year, $monthNum] = array_map('intval', explode('-', $month));
+            $startOfMonth = Carbon::create($year, $monthNum, 1)->startOfDay();
+            $endOfMonth = Carbon::create($year, $monthNum, 1)->endOfMonth()->endOfDay();
+            $previousStart = (clone $startOfMonth)->subMonth()->startOfDay();
+            $previousEnd = (clone $endOfMonth)->subMonth()->endOfDay();
+            $previousPeriodQuery = Invoice::whereBetween('created_at', [$previousStart, $previousEnd])
+                ->where('amountPaid', '>', 0);
+            $previousPeriodTotal = $previousPeriodQuery->sum('amountPaid');
+            $previousMonthTotal = $previousPeriodTotal;
         }
-        if ($request->filled('membership_id')) {
-            $previousDayQuery->where('membership_id', $request->membership_id);
-        }
-        if ($request->filled('student_id')) {
-            $previousDayQuery->where('student_id', $request->student_id);
-        }
-        if ($request->filled('creator_id')) {
-            $previousDayQuery->where('created_by', $request->creator_id);
-        }
-        if ($request->filled('school_id')) {
-            $previousDayQuery->whereHas('student', function ($studentQuery) use ($request) {
-                $studentQuery->where('schoolId', $request->school_id);
-            });
-        }
-        if ($request->filled('offer_id')) {
-            $previousDayQuery->whereHas('membership', function ($membershipQuery) use ($request) {
-                $membershipQuery->withTrashed()->where('offer_id', $request->offer_id);
-            });
-        }
-        $previousDayTotal = $previousDayQuery->sum('amountPaid');
 
         // Now paginate the results for display
         $invoices = $query->orderBy('created_at', 'desc')->paginate(20);
 
-        // For chart: group by hour and sum amountPaid (using the same filtered data)
-        $chartData = $hourlyData->sortBy('hour')->values()->map(function ($item) {
-            return [
-                'hour' => $item['hour'],
-                'total' => (float) $item['total'],
-                'label' => sprintf('%02d:00', $item['hour'])
-            ];
-        });
+        // For chart: shape data based on view
+        if ($view === 'daily') {
+            $chartData = $hourlyData->sortBy('hour')->values()->map(function ($item) {
+                return [
+                    'hour' => $item['hour'],
+                    'total' => (float) $item['total'],
+                    'label' => sprintf('%02d:00', $item['hour'])
+                ];
+            });
+        } else {
+            $chartData = $dailyData->sortBy(function ($item) {
+                return $item['day'];
+            })->values()->map(function ($item) {
+                return [
+                    'day' => $item['day'],
+                    'dayNumber' => $item['dayNumber'],
+                    'total' => (float) $item['total'],
+                    'label' => sprintf('%02d', $item['dayNumber'])
+                ];
+            });
+        }
 
         // For filters: get all memberships with their offers (including deleted ones)
         $membershipsQuery = Membership::withTrashed()->with('offer')->whereHas('offer');
@@ -220,14 +253,17 @@ if (empty($date)) {
             ],
             'chartData' => $chartData,
             'totalPaid' => (float) $totalPaid,
-            'previousDayTotal' => (float) $previousDayTotal,
+            'previousDayTotal' => (float) $previousPeriodTotal,
+            'previousMonthTotal' => isset($previousMonthTotal) ? (float) $previousMonthTotal : null,
             'cashierStats' => [
                 'totalInvoices' => $totalInvoices,
                 'totalPaid' => (float) $totalPaid,
                 'averagePayment' => (float) $averagePayment,
-                'peakHour' => $peakHour,
+                // Use a generic key for peak period; frontend will adapt label
+                'peakHour' => $peakPeriod,
             ],
-            'date' => $date,
+            'date' => $view === 'daily' ? $date : null,
+            'month' => $view === 'monthly' ? $month : null,
             'filters' => [
                 'memberships' => $memberships,
                 'students' => $students,
@@ -241,7 +277,9 @@ if (empty($date)) {
                 'creator_id' => $request->input('creator_id'),
                 'school_id' => $request->input('school_id'),
                 'offer_id' => $request->input('offer_id'), // Add offer_id to currentFilters
-                'date' => $date, // Always return the date being used
+                'date' => $view === 'daily' ? $date : null,
+                'month' => $view === 'monthly' ? $month : null,
+                'view' => $view,
             ],
             'role' => $user ? $user->role : null,
         ]);

@@ -191,6 +191,7 @@ const CashierPage = ({
   chartData = [],
   totalPaid = 0,
   previousDayTotal = 0,
+  previousMonthTotal = null,
   cashierStats = {
     totalInvoices: 0,
     totalPaid: 0,
@@ -198,12 +199,15 @@ const CashierPage = ({
     peakHour: { hour: 0, total: 0 }
   },
   date = new Date().toISOString().slice(0, 10),
+  month = new Date().toISOString().slice(0, 7),
   filters = { memberships: [], students: [], creators: [], schools: [], offers: [] },
   currentFilters = {
     membership_id: "",
     student_id: "",
     creator_id: "",
     date: new Date().toISOString().slice(0, 10),
+    month: new Date().toISOString().slice(0, 7),
+    view: 'daily',
     school_id: "",
     offer_id: "",
   },
@@ -211,11 +215,14 @@ const CashierPage = ({
   role = null,
 }) => {
   const getTodayDate = () => new Date().toISOString().slice(0, 10)
+  const getThisMonth = () => new Date().toISOString().slice(0, 7)
   const [localFilters, setLocalFilters] = useState(() => ({
     membership_id: currentFilters.membership_id || "",
     student_id: currentFilters.student_id || "",
     creator_id: currentFilters.creator_id || "",
     date: currentFilters.date || getTodayDate(),
+    month: currentFilters.month || getThisMonth(),
+    view: currentFilters.view || 'daily',
     school_id: currentFilters.school_id || "",
     offer_id: currentFilters.offer_id || "",
   }))
@@ -245,10 +252,21 @@ const CashierPage = ({
   }
 
   const chartDataConfig = {
-    labels: chartData.map((d) => `${d.hour.toString().padStart(2, "0")}h`),
+    labels: (localFilters.view === 'daily'
+      ? chartData.map((d) =>
+          typeof d.hour === 'number'
+            ? `${d.hour.toString().padStart(2, "0")}h`
+            : '--h'
+        )
+      : chartData.map((d) =>
+          typeof d.dayNumber === 'number'
+            ? d.dayNumber.toString().padStart(2, '0')
+            : '--'
+        )
+    ),
     datasets: [
       {
-        label: "Total Paid",
+        label: localFilters.view === 'daily' ? "Total par heure" : "Total par jour",
         data: chartData.map((d) => d.total),
         backgroundColor: "rgba(54, 162, 235, 0.6)",
         borderColor: "rgba(54, 162, 235, 1)",
@@ -260,8 +278,12 @@ const CashierPage = ({
   // Calculate trends and statistics using backend data
   const dailyChange = cashierStats.totalPaid - previousDayTotal
   const dailyChangePercent = previousDayTotal > 0 ? (dailyChange / previousDayTotal) * 100 : 0
-  const averagePayment = cashierStats.averagePayment
-  const peakHour = cashierStats.peakHour
+
+  // Monthly comparison
+  const monthlyChange = cashierStats.totalPaid - (typeof previousMonthTotal === 'number' ? previousMonthTotal : 0)
+  const monthlyChangePercent = (typeof previousMonthTotal === 'number' && previousMonthTotal > 0)
+    ? (monthlyChange / previousMonthTotal) * 100
+    : 0
 
   // Filter invoices based on search
   const filteredInvoices = invoices.filter(
@@ -281,6 +303,8 @@ const CashierPage = ({
         student_id: currentFilters.student_id || "",
         creator_id: currentFilters.creator_id || "",
         date: currentFilters.date || getTodayDate(),
+        month: currentFilters.month || getThisMonth(),
+        view: currentFilters.view || prev.view || 'daily',
         school_id: currentFilters.school_id || "",
         offer_id: currentFilters.offer_id || "",
       }
@@ -295,14 +319,23 @@ const CashierPage = ({
     if (name === "offer_id") {
       newFilters.membership_id = ""
     }
+    // Keep date/month depending on view
+    if (name === 'view') {
+      if (value === 'daily') {
+        newFilters.date = newFilters.date && newFilters.date.trim() !== '' ? newFilters.date : getTodayDate()
+      } else {
+        newFilters.month = newFilters.month && newFilters.month.trim() !== '' ? newFilters.month : getThisMonth()
+      }
+    }
     const finalFilters = {
       ...newFilters,
-      date: newFilters.date && newFilters.date.trim() !== "" ? newFilters.date : getTodayDate(),
+      date: newFilters.view === 'daily' ? (newFilters.date && newFilters.date.trim() !== "" ? newFilters.date : getTodayDate()) : undefined,
+      month: newFilters.view === 'monthly' ? (newFilters.month && newFilters.month.trim() !== '' ? newFilters.month : getThisMonth()) : undefined,
     }
     setLocalFilters(finalFilters)
 
     const cleanFilters = Object.fromEntries(
-      Object.entries(finalFilters).filter(([key, val]) => val !== "" || key === "date"),
+      Object.entries(finalFilters).filter(([key, val]) => val !== "" && val !== undefined),
     )
 
     router.get("/cashier/daily", cleanFilters, {
@@ -313,18 +346,21 @@ const CashierPage = ({
 
   const clearFilters = () => {
     const todayDate = getTodayDate()
+    const thisMonth = getThisMonth()
     const resetFilters = {
       membership_id: "",
       student_id: "",
       creator_id: "",
       date: todayDate,
+      month: thisMonth,
+      view: localFilters.view,
       school_id: "",
       offer_id: "",
     }
     setLocalFilters(resetFilters)
     router.get(
       "/cashier/daily",
-      { date: todayDate },
+      localFilters.view === 'daily' ? { view: 'daily', date: todayDate } : { view: 'monthly', month: thisMonth },
       {
         preserveState: true,
         preserveScroll: true,
@@ -358,7 +394,7 @@ const CashierPage = ({
     const url = URL.createObjectURL(blob)
     const a = document.createElement("a")
     a.href = url
-    a.download = `caisse_${date}.csv`
+    a.download = `caisse_${localFilters.view === 'daily' ? date : month}.csv`
     a.click()
     URL.revokeObjectURL(url)
   }
@@ -385,7 +421,9 @@ const CashierPage = ({
       downloadInvoicePdf(invoiceId, setDownloadLoading);
   };
 
-  const activeFiltersCount = Object.values(localFilters).filter((v) => v && v !== "").length - 1
+  const activeFiltersCount = Object.entries(localFilters)
+    .filter(([k]) => !['date','month','view'].includes(k))
+    .filter(([_, v]) => v && v !== "").length
 
   // Pagination handler
   const handlePageChange = (page) => {
@@ -407,14 +445,19 @@ const CashierPage = ({
                 <CreditCardIcon className="h-6 w-6 text-white" />
               </div>
               <div>
-                <h1 className="text-2xl font-bold text-slate-900">Caisse journalière</h1>
+                <h1 className="text-2xl font-bold text-slate-900">{localFilters.view === 'daily' ? 'Caisse journalière' : 'Caisse mensuelle'}</h1>
                 <p className="text-sm text-slate-600">
-                  {new Date(date).toLocaleDateString("fr-FR", {
-                    weekday: "long",
-                    year: "numeric",
-                    month: "long",
-                    day: "numeric",
-                  })}
+                  {localFilters.view === 'daily'
+                    ? new Date(date).toLocaleDateString("fr-FR", {
+                        weekday: "long",
+                        year: "numeric",
+                        month: "long",
+                        day: "numeric",
+                      })
+                    : new Date(month + "-01").toLocaleDateString("fr-FR", {
+                        year: "numeric",
+                        month: "long",
+                      })}
                 </p>
               </div>
             </div>
@@ -428,6 +471,21 @@ const CashierPage = ({
                 <RefreshIcon className={`h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`} />
                 Actualiser
               </button>
+              {/* View Toggle */}
+              <div className="inline-flex rounded-lg border border-slate-300 overflow-hidden">
+                <button
+                  onClick={() => handleFilterChange('view', 'daily')}
+                  className={`px-3 py-2 text-sm ${localFilters.view === 'daily' ? 'bg-blue-600 text-white' : 'bg-white text-slate-700'}`}
+                >
+                  Jour
+                </button>
+                <button
+                  onClick={() => handleFilterChange('view', 'monthly')}
+                  className={`px-3 py-2 text-sm border-l border-slate-300 ${localFilters.view === 'monthly' ? 'bg-blue-600 text-white' : 'bg-white text-slate-700'}`}
+                >
+                  Mois
+                </button>
+              </div>
               {!isAssistant && (
                 <>
                   <button
@@ -479,14 +537,23 @@ const CashierPage = ({
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-slate-700 flex items-center gap-2">
                     <CalendarIcon className="h-4 w-4" />
-                    Date
+                    {localFilters.view === 'daily' ? 'Date' : 'Mois'}
                   </label>
-                  <input
-                    type="date"
-                    value={localFilters.date}
-                    onChange={(e) => handleFilterChange("date", e.target.value)}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-                  />
+                  {localFilters.view === 'daily' ? (
+                    <input
+                      type="date"
+                      value={localFilters.date}
+                      onChange={(e) => handleFilterChange("date", e.target.value)}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+                    />
+                  ) : (
+                    <input
+                      type="month"
+                      value={localFilters.month}
+                      onChange={(e) => handleFilterChange("month", e.target.value)}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+                    />
+                  )}
                 </div>
 
                 {/* Offer Filter */}
@@ -591,14 +658,33 @@ const CashierPage = ({
                 <p className="text-sm font-medium text-slate-600">Total encaissé</p>
                 <p className="text-3xl font-bold text-green-700">{cashierStats.totalPaid.toLocaleString()} DH</p>
                 <div className="flex items-center gap-1 text-sm">
-                  {dailyChange >= 0 ? (
-                    <ArrowUpIcon className="h-4 w-4 text-green-600" />
+                  {localFilters.view === 'daily' ? (
+                    <>
+                      {dailyChange >= 0 ? (
+                        <ArrowUpIcon className="h-4 w-4 text-green-600" />
+                      ) : (
+                        <ArrowDownIcon className="h-4 w-4 text-red-600" />
+                      )}
+                      <span className={dailyChange >= 0 ? "text-green-600" : "text-red-600"}>
+                        {Math.abs(dailyChangePercent).toFixed(1)}% vs hier
+                      </span>
+                    </>
                   ) : (
-                    <ArrowDownIcon className="h-4 w-4 text-red-600" />
+                    typeof previousMonthTotal === 'number' && previousMonthTotal > 0 ? (
+                      <>
+                        {monthlyChange >= 0 ? (
+                          <ArrowUpIcon className="h-4 w-4 text-green-600" />
+                        ) : (
+                          <ArrowDownIcon className="h-4 w-4 text-red-600" />
+                        )}
+                        <span className={monthlyChange >= 0 ? "text-green-600" : "text-red-600"}>
+                          {Math.abs(monthlyChangePercent).toFixed(1)}% vs mois dernier
+                        </span>
+                      </>
+                    ) : (
+                      <span className="text-slate-500">Aucune comparaison mensuelle</span>
+                    )
                   )}
-                  <span className={dailyChange >= 0 ? "text-green-600" : "text-red-600"}>
-                    {Math.abs(dailyChangePercent).toFixed(1)}% vs hier
-                  </span>
                 </div>
               </div>
               <div className="p-3 bg-green-100 rounded-xl">
@@ -626,7 +712,7 @@ const CashierPage = ({
             <div className="flex items-center justify-between">
               <div className="space-y-2">
                 <p className="text-sm font-medium text-slate-600">Paiement moyen</p>
-                <p className="text-3xl font-bold text-purple-700">{averagePayment.toFixed(0)} DH</p>
+                <p className="text-3xl font-bold text-purple-700">{cashierStats.averagePayment.toFixed(0)} DH</p>
                 <p className="text-sm text-slate-500">Par transaction</p>
               </div>
               <div className="p-3 bg-purple-100 rounded-xl">
@@ -635,13 +721,25 @@ const CashierPage = ({
             </div>
           </div>
 
-          {/* Peak Hour Card */}
+          {/* Peak Period Card */}
           <div className="bg-gradient-to-br from-orange-50 to-amber-50 rounded-xl shadow-sm border border-slate-200/60 p-6">
             <div className="flex items-center justify-between">
               <div className="space-y-2">
-                <p className="text-sm font-medium text-slate-600">Heure de pointe</p>
-                <p className="text-3xl font-bold text-orange-700">{peakHour.hour.toString().padStart(2, "0")}h</p>
-                <p className="text-sm text-slate-500">{peakHour.total.toLocaleString()} DH encaissés</p>
+                <p className="text-sm font-medium text-slate-600">{localFilters.view === 'daily' ? 'Heure de pointe' : 'Jour de pointe'}</p>
+                {localFilters.view === 'daily' ? (
+                  <p className="text-3xl font-bold text-orange-700">
+                    {typeof cashierStats.peakHour.hour === 'number'
+                      ? cashierStats.peakHour.hour.toString().padStart(2, "0") + "h"
+                      : "--h"}
+                  </p>
+                ) : (
+                  <p className="text-3xl font-bold text-orange-700">
+                    {typeof cashierStats.peakHour.dayNumber === 'number'
+                      ? cashierStats.peakHour.dayNumber.toString().padStart(2, '0')
+                      : "--"}
+                  </p>
+                )}
+                <p className="text-sm text-slate-500">{cashierStats.peakHour.total.toLocaleString()} DH encaissés</p>
               </div>
               <div className="p-3 bg-orange-100 rounded-xl">
                 <ClockIcon className="h-8 w-8 text-orange-600" />
@@ -657,9 +755,9 @@ const CashierPage = ({
               <div>
                 <h3 className="text-lg font-semibold text-slate-900 flex items-center gap-2">
                   <ChartBarIcon className="h-5 w-5" />
-                  Répartition horaire
+                  {localFilters.view === 'daily' ? 'Répartition horaire' : 'Répartition journalière'}
                 </h3>
-                <p className="text-sm text-slate-600 mt-1">Analyse des revenus par heure de la journée</p>
+                <p className="text-sm text-slate-600 mt-1">{localFilters.view === 'daily' ? 'Analyse des revenus par heure de la journée' : 'Analyse des revenus par jour du mois'}</p>
               </div>
             </div>
           </div>
