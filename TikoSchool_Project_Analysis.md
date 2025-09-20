@@ -181,3 +181,10 @@ The project is built on a solid and modern technology stack. The architecture is
     *   **Resolution:** Updated the SingleTeacherPage logic to match AttendancePage by removing payment status filtering, ensuring teachers can see and interact with all students they teach, regardless of payment status.
     *   **Business Logic:** This aligns with the principle that academic activities (like attendance tracking) should not be restricted by financial payment status, maintaining separation between academic and financial concerns.
     *   **Code Location:** `app/Http/Controllers/TeacherController.php` - `totalStudents` calculation (lines 441-444).
+
+*   **Payment Months Filtering Logic:**
+    *   **Issue Identified:** The date filter in TeacherController was not properly handling invoices with partial month payments.
+    *   **Problem:** When users selected "Inclure le paiement du mois partiel" (Include partial month payment), the system saved invoices with empty `selected_months` arrays, but the date filter was only checking `billDate` instead of using the processed month logic.
+    *   **Resolution:** Updated the date filter logic to properly handle both cases: invoices with populated `selected_months` and invoices with empty `selected_months` (which should fall back to using `billDate` month).
+    *   **Business Logic:** This ensures that partial month payments are correctly counted in the monthly payment statistics, providing accurate teacher payment tracking.
+    *   **Code Location:** `app/Http/Controllers/TeacherController.php` - date filter logic (lines 605-625).

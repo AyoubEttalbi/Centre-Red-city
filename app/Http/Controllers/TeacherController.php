@@ -604,8 +604,22 @@ class TeacherController extends Controller
                 
                 // Date filter
                 if (!empty($filters['date_filter'])) {
-                    $billDate = $invoice['billDate'] ?? '';
-                    if (strpos($billDate, $filters['date_filter']) !== 0) {
+                    $invoiceMonths = $invoice['selected_months'] ?? [];
+                    if (empty($invoiceMonths)) {
+                        // Fallback: if no selected_months, use the billDate month
+                        $invoiceMonths = [$invoice['billDate'] ? date('Y-m', strtotime($invoice['billDate'])) : null];
+                    }
+                    
+                    // Check if any of the invoice months match the filter
+                    $hasMatchingMonth = false;
+                    foreach ($invoiceMonths as $month) {
+                        if ($month && strpos($month, $filters['date_filter']) === 0) {
+                            $hasMatchingMonth = true;
+                            break;
+                        }
+                    }
+                    
+                    if (!$hasMatchingMonth) {
                         return false;
                     }
                 }
