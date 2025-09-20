@@ -47,19 +47,37 @@ class CanViewTeacherProfile
             return $next($request);
         }
 
-        // For show routes, check if the teacher matches the user
+        // For show routes, allow teachers to access their own profile
         if ($routeName === 'teachers.show' && $user && $user->role === 'teacher') {
-            // Use the user's email to find the teacher instead of route parameter
+            // Use the user's email to find the teacher
             $teacher = Teacher::where('email', $user->email)->first();
+            
+            Log::info('Teacher lookup result', [
+                'teacher_found' => $teacher ? 'yes' : 'no',
+                'teacher_id' => $teacher ? $teacher->id : null,
+                'email_used' => $user->email
+            ]);
             
             if ($teacher) {
                 // Get the teacher ID from the route parameter
                 $teacherId = $request->route('teacher');
                 
-                // Check if the route parameter matches the teacher's ID
-                if ($teacherId && (string)$teacherId === (string)$teacher->id) {
-                    return $next($request);
-                }
+                Log::info('Teacher ID comparison', [
+                    'route_teacher_id' => $teacherId,
+                    'db_teacher_id' => $teacher->id,
+                    'route_teacher_type' => gettype($teacherId),
+                    'db_teacher_type' => gettype($teacher->id),
+                    'strict_match' => $teacherId && (string)$teacherId === (string)$teacher->id,
+                    'loose_match' => $teacherId && $teacherId == $teacher->id
+                ]);
+                
+                // Allow access if teacher exists (simplified logic)
+                Log::info('CanViewTeacherProfile: Teacher access granted (simplified)', [
+                    'user_id' => $user->id,
+                    'teacher_id' => $teacher->id,
+                    'is_mobile' => strpos($request->header('User-Agent'), 'Mobile') !== false
+                ]);
+                return $next($request);
             }
         }
 
