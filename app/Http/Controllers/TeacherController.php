@@ -453,6 +453,14 @@ class TeacherController extends Controller
                 }, 'student', 'student.school', 'student.class', 'offer'])
                 ->get();
             
+            // Debug: Log membership filtering
+            Log::info('Membership filtering results', [
+                'teacher_id' => $teacher->id,
+                'total_memberships_found' => $memberships->count(),
+                'memberships_with_invoices' => $memberships->filter(function($m) { return $m->invoices->count() > 0; })->count(),
+                'total_invoices_found' => $memberships->sum(function($m) { return $m->invoices->count(); }),
+            ]);
+            
             // Extract invoices from memberships and calculate the teacher's share by month
             $invoices = $memberships->flatMap(function ($membership) use ($teacher, $filters) {
                 // Skip if the student doesn't exist
@@ -480,16 +488,18 @@ class TeacherController extends Controller
                         $selectedMonths = [$invoice->billDate ? $invoice->billDate->format('Y-m') : null];
                     }
                     
-                    // Debug: Log invoice processing (only for first few invoices to avoid spam)
-                    if ($invoice->id <= 10) {
-                        Log::info('Processing invoice', [
-                            'invoice_id' => $invoice->id,
-                            'student_id' => $membership->student_id,
-                            'selected_months_raw' => $invoice->selected_months,
-                            'selected_months_processed' => $selectedMonths,
-                            'billDate' => $invoice->billDate,
-                        ]);
-                    }
+            // Debug: Log invoice processing (only for first few invoices to avoid spam)
+            if ($invoice->id <= 10) {
+                Log::info('Processing invoice', [
+                    'invoice_id' => $invoice->id,
+                    'student_id' => $membership->student_id,
+                    'selected_months_raw' => $invoice->selected_months,
+                    'selected_months_processed' => $selectedMonths,
+                    'billDate' => $invoice->billDate,
+                    'payment_status' => $membership->payment_status,
+                    'membership_deleted' => !is_null($membership->deleted_at),
+                ]);
+            }
                     
                     // Get school information
                     $schoolName = 'Unknown';
