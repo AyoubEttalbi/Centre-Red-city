@@ -204,10 +204,13 @@ The project is built on a solid and modern technology stack. The architecture is
         - The `update()` method was missing this validation rule
         - This allowed memberships to be updated with teacher data missing the `subject` field
         - 17 invoices were affected, all with partial month payments (empty `selected_months`)
+        - The same issue existed in `TransactionController` methods that power `TeacherEarningsTable.jsx` and `TeacherEarningsDetailModal.jsx`
     *   **Resolution:** 
         1. Added missing `teachers.*.subject` validation to the `update()` method
         2. Implemented fallback logic in `TeacherController` to handle existing incomplete data
-        3. The fallback uses the teacher's first subject when the `subject` field is missing
+        3. Implemented fallback logic in `TransactionController` methods (`teacherMonthlyEarningsReport` and `teacherInvoiceBreakdown`)
+        4. The fallback uses the teacher's first subject when the `subject` field is missing
     *   **Code Locations:** 
         - `app/Http/Controllers/MembershipController.php` - Fixed validation in update method (lines 130-137)
         - `app/Http/Controllers/TeacherController.php` - Added fallback logic (lines 494-495, 778-779)
+        - `app/Http/Controllers/TransactionController.php` - Added fallback logic (lines 2081, 2215)

@@ -2078,7 +2078,7 @@ public function processMonthRecurringTransactions(Request $request)
                 
                 // Calculate teacher earnings per month based on Offer percentage
                 $offer = $invoice->offer;
-                $teacherSubject = $teacherData['subject'] ?? null;
+                $teacherSubject = $teacherData['subject'] ?? ($teacher->subjects->first()->name ?? 'Unknown');
                 
                 if (!$offer || !$teacherSubject || !is_array($offer->percentage)) {
                     continue;
@@ -2211,7 +2211,8 @@ public function processMonthRecurringTransactions(Request $request)
                     if (isset($teacherData['teacherId']) && (string)$teacherData['teacherId'] === (string)$teacherId) {
                         // Calculate teacher share for this specific month based on Offer percentage
                         $offer = $invoice->offer;
-                        $teacherSubject = $teacherData['subject'] ?? null;
+                        $teacher = \App\Models\Teacher::find($teacherData['teacherId']);
+                        $teacherSubject = $teacherData['subject'] ?? ($teacher ? $teacher->subjects->first()->name : null) ?? 'Unknown';
                         
                         if ($offer && $teacherSubject && is_array($offer->percentage)) {
                             // Get teacher percentage from offer
