@@ -580,7 +580,7 @@ const TeacherInvoicesTable = ({
                             )}
                         </p>
                         <p className="text-2xl font-bold text-blue-800">
-                            {totalInvoices}
+                            {uniqueStudents}
                         </p>
                     </div>
                     <div className="bg-gradient-to-r from-green-50 to-green-100 p-4 rounded-lg shadow-sm border border-green-200">

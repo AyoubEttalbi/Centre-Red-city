@@ -188,3 +188,10 @@ The project is built on a solid and modern technology stack. The architecture is
     *   **Resolution:** Updated the date filter logic to properly handle both cases: invoices with populated `selected_months` and invoices with empty `selected_months` (which should fall back to using `billDate` month).
     *   **Business Logic:** This ensures that partial month payments are correctly counted in the monthly payment statistics, providing accurate teacher payment tracking.
     *   **Code Location:** `app/Http/Controllers/TeacherController.php` - date filter logic (lines 605-625).
+
+*   **Frontend Display Issue - Payment Months Count:**
+    *   **Issue Identified:** The "Mois de paiement" (Payment months) card in TeacherInvoicesTable was displaying the total number of invoices instead of the unique students count.
+    *   **Problem:** The frontend was showing `{totalInvoices}` (total invoice count) when it should show `{uniqueStudents}` (unique students with payments for the selected month).
+    *   **Resolution:** Changed the display value from `{totalInvoices}` to `{uniqueStudents}` in the TeacherInvoicesTable component.
+    *   **Business Logic:** This provides clearer distinction between "number of invoices" and "number of students with payments", making the statistics more meaningful for teachers.
+    *   **Code Location:** `resources/js/Components/TeacherInvoicesTable.jsx` - payment months display (line 583).
