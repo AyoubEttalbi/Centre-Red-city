@@ -439,7 +439,6 @@ class TeacherController extends Controller
             
             // Calculate total students for this teacher (including deleted memberships)
             $totalStudents = Membership::withTrashed()
-                ->whereIn('payment_status', ['paid', 'pending'])
                 ->whereJsonContains('teachers', [['teacherId' => (string) $teacher->id]])
                 ->distinct('student_id')
                 ->count('student_id');

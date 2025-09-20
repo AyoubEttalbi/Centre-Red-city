@@ -174,3 +174,10 @@ The project is built on a solid and modern technology stack. The architecture is
     *   **Observation:** The teacher membership payment system demonstrates excellent architectural design with proper separation of concerns, comprehensive logging, and robust error handling.
     *   **Suggestion:** Consider implementing additional monitoring and alerting for the scheduled payment processing to ensure teachers receive their payments reliably.
     *   **Suggestion:** The system could benefit from additional validation to prevent edge cases in payment calculations, especially for complex scenarios involving multiple partial payments.
+
+*   **Student-Teacher Relationship Consistency:**
+    *   **Issue Identified:** There was an inconsistency in how student counts were calculated between the SingleTeacherPage and AttendancePage modules.
+    *   **Problem:** The SingleTeacherPage was filtering students by payment status (`paid` or `pending`) when counting total students, while the AttendancePage counted all students taught by a teacher regardless of payment status.
+    *   **Resolution:** Updated the SingleTeacherPage logic to match AttendancePage by removing payment status filtering, ensuring teachers can see and interact with all students they teach, regardless of payment status.
+    *   **Business Logic:** This aligns with the principle that academic activities (like attendance tracking) should not be restricted by financial payment status, maintaining separation between academic and financial concerns.
+    *   **Code Location:** `app/Http/Controllers/TeacherController.php` - `totalStudents` calculation (lines 441-444).
