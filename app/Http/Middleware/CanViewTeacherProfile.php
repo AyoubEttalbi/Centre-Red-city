@@ -21,8 +21,23 @@ class CanViewTeacherProfile
         $user = Auth::user();
         $routeName = $request->route()->getName();
         
+        // Log middleware execution
+        Log::info('CanViewTeacherProfile middleware executed', [
+            'user_id' => $user ? $user->id : null,
+            'user_role' => $user ? $user->role : null,
+            'route' => $routeName,
+            'url' => $request->url(),
+            'is_mobile' => strpos($request->header('User-Agent'), 'Mobile') !== false,
+            'session_id' => $request->session()->getId()
+        ]);
+        
         // Allow if admin OR if admin is impersonating (admin_user_id in session)
         if ($user && ($user->role === 'admin' || session()->has('admin_user_id'))) {
+            Log::info('CanViewTeacherProfile: Admin access granted', [
+                'user_id' => $user->id,
+                'user_role' => $user->role,
+                'is_mobile' => strpos($request->header('User-Agent'), 'Mobile') !== false
+            ]);
             return $next($request);
         }
 
@@ -52,6 +67,16 @@ class CanViewTeacherProfile
             return $next($request);
         }
 
+        // Log the denial
+        Log::warning('CanViewTeacherProfile: Access denied', [
+            'user_id' => $user ? $user->id : null,
+            'user_role' => $user ? $user->role : null,
+            'route' => $routeName,
+            'url' => $request->url(),
+            'is_mobile' => strpos($request->header('User-Agent'), 'Mobile') !== false,
+            'session_id' => $request->session()->getId()
+        ]);
+        
         // Otherwise, deny access
         abort(403, 'Unauthorized');
     }

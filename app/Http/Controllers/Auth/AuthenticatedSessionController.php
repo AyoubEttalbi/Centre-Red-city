@@ -32,14 +32,42 @@ class AuthenticatedSessionController extends Controller
      */
     public function store(LoginRequest $request): RedirectResponse
     {
-        // Authenticate the user
-        $request->authenticate();
+        // Log the login attempt
+        Log::info('Login attempt started', [
+            'email' => $request->email,
+            'ip' => $request->ip(),
+            'user_agent' => $request->header('User-Agent'),
+            'is_mobile' => strpos($request->header('User-Agent'), 'Mobile') !== false,
+            'session_id_before' => $request->session()->getId()
+        ]);
+
+        try {
+            // Authenticate the user
+            $request->authenticate();
+        } catch (\Exception $e) {
+            Log::error('Authentication failed', [
+                'email' => $request->email,
+                'error' => $e->getMessage(),
+                'is_mobile' => strpos($request->header('User-Agent'), 'Mobile') !== false,
+                'user_agent' => $request->header('User-Agent')
+            ]);
+            throw $e;
+        }
 
         // Regenerate the session
         $request->session()->regenerate();
 
         // Get the authenticated user
         $user = Auth::user();
+        
+        // Log successful authentication
+        Log::info('User authenticated successfully', [
+            'user_id' => $user->id,
+            'user_email' => $user->email,
+            'user_role' => $user->role,
+            'session_id_after' => $request->session()->getId(),
+            'is_mobile' => strpos($request->header('User-Agent'), 'Mobile') !== false
+        ]);
         
         // Redirect based on the user's role
         if ($user->role === 'teacher') {
@@ -73,6 +101,13 @@ class AuthenticatedSessionController extends Controller
                 return redirect()->route('assistants.show', $assistant->id);
             }
         }
+
+        // Log redirect decision
+        Log::info('Redirecting user to dashboard', [
+            'user_id' => $user->id,
+            'user_role' => $user->role,
+            'is_mobile' => strpos($request->header('User-Agent'), 'Mobile') !== false
+        ]);
 
         // Default redirect for other roles (e.g., admin)
         return redirect()->intended(route('dashboard', absolute: false));

@@ -20,7 +20,28 @@ return Application::configure(basePath: dirname(__DIR__))
         //
     })
     ->withExceptions(function (Exceptions $exceptions) {
-        //
+        // Log all 403 errors with detailed information
+        $exceptions->render(function (\Symfony\Component\HttpKernel\Exception\HttpException $e, $request) {
+            if ($e->getStatusCode() === 403) {
+                Log::error('403 UNAUTHORIZED Error', [
+                    'url' => $request->url(),
+                    'method' => $request->method(),
+                    'user_agent' => $request->header('User-Agent'),
+                    'is_mobile' => strpos($request->header('User-Agent'), 'Mobile') !== false,
+                    'ip' => $request->ip(),
+                    'user_id' => auth()->id(),
+                    'user_role' => auth()->user() ? auth()->user()->role : null,
+                    'session_id' => $request->session()->getId(),
+                    'cookies' => $request->cookies->all(),
+                    'headers' => $request->headers->all(),
+                    'route' => $request->route() ? $request->route()->getName() : null,
+                    'exception_message' => $e->getMessage(),
+                    'exception_file' => $e->getFile(),
+                    'exception_line' => $e->getLine(),
+                    'stack_trace' => $e->getTraceAsString()
+                ]);
+            }
+        });
     })
     ->withSchedule(function (\Illuminate\Console\Scheduling\Schedule $schedule) {
         // Schedule the membership expiration command to run daily

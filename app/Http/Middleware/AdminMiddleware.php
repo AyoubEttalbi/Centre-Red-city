@@ -10,8 +10,27 @@ class AdminMiddleware
 {
     public function handle(Request $request, Closure $next)
     {
+        $user = Auth::user();
+        
+        // Log middleware execution
+        Log::info('AdminMiddleware executed', [
+            'user_id' => $user ? $user->id : null,
+            'user_role' => $user ? $user->role : null,
+            'is_authenticated' => Auth::check(),
+            'route' => $request->route() ? $request->route()->getName() : null,
+            'url' => $request->url(),
+            'is_mobile' => strpos($request->header('User-Agent'), 'Mobile') !== false,
+            'session_id' => $request->session()->getId()
+        ]);
+        
         // Check if user is logged in and is an admin
-        if (!Auth::check() || Auth::user()->role !== 'admin') {
+        if (!Auth::check() || $user->role !== 'admin') {
+            Log::warning('AdminMiddleware blocked access', [
+                'user_id' => $user ? $user->id : null,
+                'user_role' => $user ? $user->role : null,
+                'is_authenticated' => Auth::check(),
+                'is_mobile' => strpos($request->header('User-Agent'), 'Mobile') !== false
+            ]);
             return redirect('/dashboard')->with('error', 'Access Denied');
         }
 

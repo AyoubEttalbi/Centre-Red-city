@@ -14,6 +14,16 @@ class RoleRedirect
     public function handle(Request $request, Closure $next)
     {
         $user = Auth::user();
+        
+        // Log middleware execution
+        Log::info('RoleRedirect middleware executed', [
+            'user_id' => $user ? $user->id : null,
+            'user_role' => $user ? $user->role : null,
+            'route' => $request->route() ? $request->route()->getName() : null,
+            'url' => $request->url(),
+            'is_mobile' => strpos($request->header('User-Agent'), 'Mobile') !== false,
+            'session_id' => $request->session()->getId()
+        ]);
 
         if ($user) {
             // Skip redirection for profile routes, update routes, list pages, and other specific routes
