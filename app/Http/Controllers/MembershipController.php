@@ -131,6 +131,7 @@ class MembershipController extends Controller
                 'student_id' => 'required|integer',
                 'offer_id' => 'required|integer',
                 'teachers' => 'required|array',
+                'teachers.*.subject' => 'required|string',
                 'teachers.*.teacherId' => 'required|string',
                 'teachers.*.amount' => 'required|numeric',
             ]);

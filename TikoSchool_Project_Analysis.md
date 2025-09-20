@@ -198,12 +198,16 @@ The project is built on a solid and modern technology stack. The architecture is
 
 *   **Partial Month Payment Counting Discrepancy:**
     *   **Issue Identified:** There's a discrepancy between expected unique students count (143) and actual frontend display (126) for teacher ID 2 in September 2025.
-    *   **Problem:** The backend logic was skipping 17 invoices because the teacher data in memberships was missing the `subject` field, causing invoices to be filtered out during processing.
-    *   **Investigation:** Added debugging logs to the TeacherController to track:
-        - Total invoices processed before filtering
-        - Invoices filtered out by date filter
-        - Final stats calculation
-        - Sample student IDs and invoice IDs for verification
-        - Invoices skipped due to missing teacher data
-    *   **Resolution:** Modified the teacher data validation to make the `subject` field optional and provide a fallback to the teacher's first subject when the field is missing.
-    *   **Code Location:** `app/Http/Controllers/TeacherController.php` - teacher data validation (lines 482-495) and subject fallback logic.
+    *   **Root Cause Found:** The `MembershipController::update()` method was missing validation for the `teachers.*.subject` field, allowing incomplete teacher data to be saved to the database.
+    *   **Technical Details:** 
+        - The `store()` method correctly validates `teachers.*.subject` as required
+        - The `update()` method was missing this validation rule
+        - This allowed memberships to be updated with teacher data missing the `subject` field
+        - 17 invoices were affected, all with partial month payments (empty `selected_months`)
+    *   **Resolution:** 
+        1. Added missing `teachers.*.subject` validation to the `update()` method
+        2. Implemented fallback logic in `TeacherController` to handle existing incomplete data
+        3. The fallback uses the teacher's first subject when the `subject` field is missing
+    *   **Code Locations:** 
+        - `app/Http/Controllers/MembershipController.php` - Fixed validation in update method (lines 130-137)
+        - `app/Http/Controllers/TeacherController.php` - Added fallback logic (lines 494-495, 778-779)
