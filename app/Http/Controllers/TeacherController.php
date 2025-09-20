@@ -479,7 +479,7 @@ class TeacherController extends Controller
                         return isset($item['teacherId']) && $item['teacherId'] == (string)$teacher->id;
                     });
                     
-                    if (!$teacherData || !isset($teacherData['subject'])) {
+                    if (!$teacherData) {
                         // Debug: Log skipped invoices due to teacher data
                         Log::info('Skipped invoice - no teacher data', [
                             'invoice_id' => $invoice->id,
@@ -490,6 +490,9 @@ class TeacherController extends Controller
                         ]);
                         return [];
                     }
+                    
+                    // Use subject from teacher data or fallback to teacher's first subject
+                    $subject = $teacherData['subject'] ?? ($teacher->subjects->first()->name ?? 'Unknown');
                     
                     // Get selected months for this invoice
                     $selectedMonths = $invoice->selected_months ?? [];
@@ -534,7 +537,7 @@ class TeacherController extends Controller
                     
                     // Calculate teacher earnings per month
                     $offer = $invoice->offer;
-                    $teacherSubject = $teacherData['subject'];
+                    $teacherSubject = $subject;
                     
                     if (!$offer || !$teacherSubject || !is_array($offer->percentage)) {
                         return [];
@@ -770,7 +773,10 @@ class TeacherController extends Controller
                         return isset($item['teacherId']) && $item['teacherId'] == (string)$teacher->id;
                     });
                     
-                    if (!$teacherData || !isset($teacherData['subject'])) return [];
+                    if (!$teacherData) return [];
+                    
+                    // Use subject from teacher data or fallback to teacher's first subject
+                    $subject = $teacherData['subject'] ?? ($teacher->subjects->first()->name ?? 'Unknown');
                     
                     $selectedMonths = $invoice->selected_months ?? [];
                     if (is_string($selectedMonths)) {

@@ -198,12 +198,12 @@ The project is built on a solid and modern technology stack. The architecture is
 
 *   **Partial Month Payment Counting Discrepancy:**
     *   **Issue Identified:** There's a discrepancy between expected unique students count (143) and actual frontend display (126) for teacher ID 2 in September 2025.
-    *   **Problem:** The backend logic appears correct in test scripts, but the actual controller is returning different results, suggesting 17 students with partial month payments are not being counted correctly.
+    *   **Problem:** The backend logic was skipping 17 invoices because the teacher data in memberships was missing the `subject` field, causing invoices to be filtered out during processing.
     *   **Investigation:** Added debugging logs to the TeacherController to track:
         - Total invoices processed before filtering
         - Invoices filtered out by date filter
         - Final stats calculation
         - Sample student IDs and invoice IDs for verification
-    *   **Current Status:** Logs show the controller is processing 126 invoices and returning 126 unique students, which matches the frontend display. The test scripts were calculating 143 because they were processing invoices differently (one per student vs one per month per student).
-    *   **Resolution:** The controller logic is working correctly. The discrepancy was in our test script methodology, not in the actual controller code.
-    *   **Code Location:** `app/Http/Controllers/TeacherController.php` - stats calculation (lines 677-685) and invoice processing (lines 483-490).
+        - Invoices skipped due to missing teacher data
+    *   **Resolution:** Modified the teacher data validation to make the `subject` field optional and provide a fallback to the teacher's first subject when the field is missing.
+    *   **Code Location:** `app/Http/Controllers/TeacherController.php` - teacher data validation (lines 482-495) and subject fallback logic.
