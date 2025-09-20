@@ -465,6 +465,11 @@ class TeacherController extends Controller
             $invoices = $memberships->flatMap(function ($membership) use ($teacher, $filters) {
                 // Skip if the student doesn't exist
                 if (!$membership->student) {
+                    // Debug: Log skipped memberships
+                    Log::info('Skipped membership - no student', [
+                        'membership_id' => $membership->id,
+                        'student_id' => $membership->student_id,
+                    ]);
                     return [];
                 }
                 
@@ -475,6 +480,14 @@ class TeacherController extends Controller
                     });
                     
                     if (!$teacherData || !isset($teacherData['subject'])) {
+                        // Debug: Log skipped invoices due to teacher data
+                        Log::info('Skipped invoice - no teacher data', [
+                            'invoice_id' => $invoice->id,
+                            'student_id' => $membership->student_id,
+                            'membership_id' => $membership->id,
+                            'teachers_data' => $membership->teachers,
+                            'teacher_id_looking_for' => $teacher->id,
+                        ]);
                         return [];
                     }
                     
@@ -539,7 +552,15 @@ class TeacherController extends Controller
                     // Create one row per month
                     $monthlyInvoices = [];
                     foreach ($selectedMonths as $month) {
-                        if (!$month) continue;
+                        if (!$month) {
+                            // Debug: Log skipped months
+                            Log::info('Skipped month - empty', [
+                                'invoice_id' => $invoice->id,
+                                'student_id' => $membership->student_id,
+                                'selected_months' => $selectedMonths,
+                            ]);
+                            continue;
+                        }
                         
                         // Debug: Log monthly processing (only for first few invoices to avoid spam)
                         if ($invoice->id <= 10) {
