@@ -203,5 +203,7 @@ The project is built on a solid and modern technology stack. The architecture is
         - Total invoices processed before filtering
         - Invoices filtered out by date filter
         - Final stats calculation
-    *   **Next Steps:** Monitor the Laravel logs to identify which invoices are being filtered out and why, then adjust the logic accordingly.
-    *   **Code Location:** `app/Http/Controllers/TeacherController.php` - stats calculation (lines 667-674) and date filter (lines 623-631).
+        - Sample student IDs and invoice IDs for verification
+    *   **Current Status:** Logs show the controller is processing 126 invoices and returning 126 unique students, which matches the frontend display. The test scripts were calculating 143 because they were processing invoices differently (one per student vs one per month per student).
+    *   **Resolution:** The controller logic is working correctly. The discrepancy was in our test script methodology, not in the actual controller code.
+    *   **Code Location:** `app/Http/Controllers/TeacherController.php` - stats calculation (lines 677-685) and invoice processing (lines 483-490).

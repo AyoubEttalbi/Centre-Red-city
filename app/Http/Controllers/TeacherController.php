@@ -480,6 +480,17 @@ class TeacherController extends Controller
                         $selectedMonths = [$invoice->billDate ? $invoice->billDate->format('Y-m') : null];
                     }
                     
+                    // Debug: Log invoice processing (only for first few invoices to avoid spam)
+                    if ($invoice->id <= 10) {
+                        Log::info('Processing invoice', [
+                            'invoice_id' => $invoice->id,
+                            'student_id' => $membership->student_id,
+                            'selected_months_raw' => $invoice->selected_months,
+                            'selected_months_processed' => $selectedMonths,
+                            'billDate' => $invoice->billDate,
+                        ]);
+                    }
+                    
                     // Get school information
                     $schoolName = 'Unknown';
                     $schoolId = null;
@@ -519,6 +530,17 @@ class TeacherController extends Controller
                     $monthlyInvoices = [];
                     foreach ($selectedMonths as $month) {
                         if (!$month) continue;
+                        
+                        // Debug: Log monthly processing (only for first few invoices to avoid spam)
+                        if ($invoice->id <= 10) {
+                            Log::info('Processing month for invoice', [
+                                'invoice_id' => $invoice->id,
+                                'student_id' => $membership->student_id,
+                                'month' => $month,
+                                'date_filter' => $filters['date_filter'] ?? 'none',
+                                'month_matches_filter' => $month === ($filters['date_filter'] ?? 'none'),
+                            ]);
+                        }
                         
                         // Format month for display (MM-YYYY)
                         $monthDisplay = date('m-Y', strtotime($month . '-01'));
@@ -620,15 +642,17 @@ class TeacherController extends Controller
                     }
 
                     if (!$hasMatchingMonth) {
-                        // Debug: Log filtered out invoices
-                        Log::info('Invoice filtered out by date', [
-                            'invoice_id' => $invoice['id'] ?? 'unknown',
-                            'student_id' => $invoice['student_id'] ?? 'unknown',
-                            'selected_months' => $invoice['selected_months'] ?? 'empty',
-                            'processed_months' => $invoiceMonths,
-                            'date_filter' => $filters['date_filter'],
-                            'billDate' => $invoice['billDate'] ?? 'unknown',
-                        ]);
+                        // Debug: Log filtered out invoices (only for first few to avoid spam)
+                        if (($invoice['invoice_id'] ?? 0) <= 10) {
+                            Log::info('Invoice filtered out by date', [
+                                'invoice_id' => $invoice['id'] ?? 'unknown',
+                                'student_id' => $invoice['student_id'] ?? 'unknown',
+                                'selected_months' => $invoice['selected_months'] ?? 'empty',
+                                'processed_months' => $invoiceMonths,
+                                'date_filter' => $filters['date_filter'],
+                                'billDate' => $invoice['billDate'] ?? 'unknown',
+                            ]);
+                        }
                         return false;
                     }
                 }
@@ -680,6 +704,11 @@ class TeacherController extends Controller
                 'total_invoices' => $stats['total_invoices'],
                 'unique_students' => $stats['unique_students'],
                 'invoices_count_before_filter' => $invoices->count(),
+                'sample_student_ids' => $invoices->pluck('student_id')->unique()->take(5)->toArray(),
+                'sample_invoice_ids' => $invoices->pluck('id')->take(5)->toArray(),
+                'all_student_ids_count' => $invoices->pluck('student_id')->count(),
+                'unique_student_ids_count' => $invoices->pluck('student_id')->unique()->count(),
+                'duplicate_students' => $invoices->pluck('student_id')->count() - $invoices->pluck('student_id')->unique()->count(),
             ]);
             
             
