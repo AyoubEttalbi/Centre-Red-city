@@ -59,19 +59,7 @@ class CanViewTeacherProfile
             ]);
             
             if ($teacher) {
-                // Get the teacher ID from the route parameter
-                $teacherId = $request->route('teacher');
-                
-                Log::info('Teacher ID comparison', [
-                    'route_teacher_id' => $teacherId,
-                    'db_teacher_id' => $teacher->id,
-                    'route_teacher_type' => gettype($teacherId),
-                    'db_teacher_type' => gettype($teacher->id),
-                    'strict_match' => $teacherId && (string)$teacherId === (string)$teacher->id,
-                    'loose_match' => $teacherId && $teacherId == $teacher->id
-                ]);
-                
-                // Allow access if teacher exists (simplified logic)
+                // Allow access if teacher exists (simplified logic - no ID matching needed)
                 Log::info('CanViewTeacherProfile: Teacher access granted (simplified)', [
                     'user_id' => $user->id,
                     'teacher_id' => $teacher->id,
