@@ -195,3 +195,13 @@ The project is built on a solid and modern technology stack. The architecture is
     *   **Resolution:** Changed the display value from `{totalInvoices}` to `{uniqueStudents}` in the TeacherInvoicesTable component.
     *   **Business Logic:** This provides clearer distinction between "number of invoices" and "number of students with payments", making the statistics more meaningful for teachers.
     *   **Code Location:** `resources/js/Components/TeacherInvoicesTable.jsx` - payment months display (line 583).
+
+*   **Partial Month Payment Counting Discrepancy:**
+    *   **Issue Identified:** There's a discrepancy between expected unique students count (143) and actual frontend display (126) for teacher ID 2 in September 2025.
+    *   **Problem:** The backend logic appears correct in test scripts, but the actual controller is returning different results, suggesting 17 students with partial month payments are not being counted correctly.
+    *   **Investigation:** Added debugging logs to the TeacherController to track:
+        - Total invoices processed before filtering
+        - Invoices filtered out by date filter
+        - Final stats calculation
+    *   **Next Steps:** Monitor the Laravel logs to identify which invoices are being filtered out and why, then adjust the logic accordingly.
+    *   **Code Location:** `app/Http/Controllers/TeacherController.php` - stats calculation (lines 667-674) and date filter (lines 623-631).

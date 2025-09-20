@@ -609,7 +609,7 @@ class TeacherController extends Controller
                         // Fallback: if no selected_months, use the billDate month
                         $invoiceMonths = [$invoice['billDate'] ? date('Y-m', strtotime($invoice['billDate'])) : null];
                     }
-                    
+
                     // Check if any of the invoice months match the filter
                     $hasMatchingMonth = false;
                     foreach ($invoiceMonths as $month) {
@@ -618,8 +618,17 @@ class TeacherController extends Controller
                             break;
                         }
                     }
-                    
+
                     if (!$hasMatchingMonth) {
+                        // Debug: Log filtered out invoices
+                        Log::info('Invoice filtered out by date', [
+                            'invoice_id' => $invoice['id'] ?? 'unknown',
+                            'student_id' => $invoice['student_id'] ?? 'unknown',
+                            'selected_months' => $invoice['selected_months'] ?? 'empty',
+                            'processed_months' => $invoiceMonths,
+                            'date_filter' => $filters['date_filter'],
+                            'billDate' => $invoice['billDate'] ?? 'unknown',
+                        ]);
                         return false;
                     }
                 }
@@ -663,6 +672,15 @@ class TeacherController extends Controller
                 'pending_months' => $this->calculatePendingMonths($invoices),
                 'active_memberships' => $invoices->pluck('membership_id')->unique()->count(),
             ];
+            
+            // Debug: Log the stats for troubleshooting
+            Log::info('Teacher stats calculated', [
+                'teacher_id' => $teacher->id,
+                'date_filter' => $filters['date_filter'] ?? 'none',
+                'total_invoices' => $stats['total_invoices'],
+                'unique_students' => $stats['unique_students'],
+                'invoices_count_before_filter' => $invoices->count(),
+            ]);
             
             
             // Paginate the invoices
