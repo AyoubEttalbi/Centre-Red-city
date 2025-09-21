@@ -125,7 +125,7 @@ export default function DashboardLayout({ children }) {
                 {children}
 
                 {/* Floating message button */}
-                {!showInbox && (
+                {/* {!showInbox && (
                     <button
                         onClick={() => setShowInbox(true)}
                         className="fixed bottom-6 right-6 bg-purple-600 text-white p-3 rounded-full shadow-lg hover:bg-purple-700 transition-colors"
@@ -150,16 +150,16 @@ export default function DashboardLayout({ children }) {
                             </span>
                         )}
                     </button>
-                )}
+                )} */}
 
                 {/* Inbox Popup */}
-                {showInbox && (
+                {/* {showInbox && (
                     <InboxPopup
                         auth={auth}
                         users={usersWithStatus}
                         onClose={handleClosePopup}
                     />
-                )}
+                )} */}
             </div>
         </div>
     );
