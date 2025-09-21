@@ -193,11 +193,10 @@ const TeacherInvoicesTable = ({
                         }
                         onChange={toggleSelectAll}
                     />
-                    <span className="hidden md:inline">ID Facture</span>
+                    <span>ID Facture</span>
                 </div>
             ),
             accessor: "invoice_id",
-            className: "md:table-cell",
         },
         {
             header: "Élève",
@@ -206,37 +205,30 @@ const TeacherInvoicesTable = ({
         {
             header: "Classe",
             accessor: "student_class",
-            className: "hidden md:table-cell",
         },
         {
             header: "École",
             accessor: "student_school",
-            className: "hidden lg:table-cell",
         },
         {
             header: "Offre",
             accessor: "offer_name",
-            className: "hidden lg:table-cell",
         },
         {
             header: "Statut",
             accessor: "membership_status",
-            className: "hidden md:table-cell",
         },
         {
             header: "Date de facture",
             accessor: "billDate",
-            className: "hidden md:table-cell",
         },
         {
             header: "Gains",
             accessor: "teacher_amount",
-            className: "hidden md:table-cell",
         },
         {
             header: "Mois",
             accessor: "month_display",
-            className: "hidden lg:table-cell",
         },
         { header: "Actions", accessor: "action" },
     ];
@@ -264,7 +256,7 @@ const TeacherInvoicesTable = ({
                             onChange={() => toggleInvoiceSelection(item.invoice_id)}
                             onClick={(e) => e.stopPropagation()}
                         />
-                        <span className="md:inline">{item.invoice_id}</span>
+                        <span>{item.invoice_id}</span>
                     </div>
                 </td>
                 <td className="p-4 font-medium">
@@ -279,16 +271,16 @@ const TeacherInvoicesTable = ({
                         )}
                     </div>
                 </td>
-                <td className="p-4 hidden md:table-cell">
+                <td className="p-4">
                     {item.student_class || "—"}
                 </td>
-                <td className="p-4 hidden lg:table-cell">
+                <td className="p-4">
                     {item.student_school || "—"}
                 </td>
-                <td className="p-4 hidden lg:table-cell">
+                <td className="p-4">
                     {item.offer_name || "—"}
                 </td>
-                <td className="p-4 hidden md:table-cell">
+                <td className="p-4">
                     {item.membership_deleted ? (
                         <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
                             <span className="w-2 h-2 bg-red-400 rounded-full mr-1"></span>
@@ -306,11 +298,11 @@ const TeacherInvoicesTable = ({
                         </span>
                     )}
                 </td>
-                <td className="p-4 hidden md:table-cell">{billDate}</td>
-                <td className="p-4 hidden md:table-cell font-semibold text-green-500">
+                <td className="p-4">{billDate}</td>
+                <td className="p-4 font-semibold text-green-500">
                     + {teacherAmount} DH
                 </td>
-                <td className="p-4 hidden lg:table-cell text-center">
+                <td className="p-4 text-center">
                     <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
                         {item.month_display || 'N/A'}
                     </span>

@@ -96,95 +96,65 @@ const SingleTeacherPage = ({
                     )}
                 {/* HAUT */}
                 <div className="flex flex-col lg:flex-row gap-4">
-                    {/* CARTE INFO UTILISATEUR */}
-                    <div className="bg-lamaSky py-6 px-4 rounded-md flex-1 flex gap-4">
-                        <div className="w-1/3">
+                    {/* CARTE INFO UTILISATEUR - Responsive: mobile style only on small screens */}
+                    <div className="bg-lamaSky py-4 px-2 rounded-md flex-1 flex-col flex items-center sm:bg-lamaSky sm:py-6 sm:px-4 sm:rounded-md sm:flex-row sm:items-stretch sm:gap-4 sm:flex">
+                        {/* Avatar */}
+                        <div className="w-full flex justify-center sm:justify-start sm:w-1/3 mb-2 sm:mb-0">
                             <img
-                                src={
-                                    teacher.profile_image
-                                        ? teacher.profile_image
-                                        // : "https://images.pexels.com/photos/2888150/pexels-photo-2888150.jpeg?auto=compress&cs=tinysrgb&w=1200"
-                                        : "/teacherPrfile2.png"
-                                }
+                                src={teacher.profile_image ? teacher.profile_image : "/teacherPrfile2.png"}
                                 alt={teacher.last_name}
                                 width={144}
                                 height={144}
-                                className="w-36 h-36 rounded-full object-cover"
+                                className="rounded-full object-cover w-16 h-16 mb-2 sm:w-36 sm:h-36 sm:mb-0"
                             />
                         </div>
-                        <div className="w-2/3 flex flex-col justify-between gap-4">
-                            <div className="flex items-center gap-4">
-                                <h1 className="text-xl font-semibold">
+                        {/* Info */}
+                        <div className="w-full sm:w-2/3 flex flex-col justify-between gap-2 sm:gap-4 items-center sm:items-start">
+                            <div className="flex flex-col items-center sm:flex-row sm:items-center gap-1 sm:gap-4 w-full">
+                                <h1 className="text-base sm:text-xl font-semibold text-center sm:text-left">
                                     {teacher.first_name} {teacher.last_name}
                                 </h1>
                                 <span
-                                    className={`px-3 py-1 rounded-full text-xs font-medium ${
+                                    className={`inline-block mt-1 sm:mt-0 rounded-full px-3 py-0.5 text-xs font-medium ${
                                         teacher.status === "active"
                                             ? "bg-green-100 text-green-800 border border-green-200"
                                             : "bg-red-100 text-red-800 border border-red-200"
                                     }`}
                                 >
-                                    {teacher.status === "active"
-                                        ? "Actif"
-                                        : "Inactif"}
+                                    {teacher.status === "active" ? "Actif" : "Inactif"}
                                 </span>
                             </div>
-                            <p className="text-sm text-gray-500">
-                                {teacher.bio || "Aucune biographie disponible."}
-                            </p>
-                            <div className="flex items-center justify-between gap-2 flex-wrap text-xs font-medium">
-                                <div className="w-full md:w-1/3 lg:w-full 2xl:w-1/3 flex items-center gap-2">
-                                    <img
-                                        src="/school.png"
-                                        alt="École"
-                                        width={14}
-                                        height={14}
-                                    />
+                            <div className="border-t border-white/40 w-full my-2 sm:hidden"></div>
+                            {teacher.bio && (
+                                <p className="text-xs sm:text-sm text-gray-500 text-center sm:text-left">
+                                    {teacher.bio}
+                                </p>
+                            )}
+                            <div className="flex flex-col gap-1 w-full text-sm sm:text-xs font-medium">
+                                <div className="flex items-center gap-1 justify-center sm:justify-start">
+                                    <img src="/school.png" alt="École" className="w-4 h-4" />
                                     <span>
-                                        {teacher.schools &&
-                                        teacher.schools.length > 0
-                                            ? teacher.schools
-                                                  .map((school) => school.name)
-                                                  .join(", ")
+                                        {teacher.schools && teacher.schools.length > 0
+                                            ? teacher.schools.map((school) => school.name).join(", ")
                                             : "Aucune école assignée"}
                                     </span>
                                 </div>
-                                <div className="w-full md:w-1/3 lg:w-full 2xl:w-1/3 flex items-center gap-2">
-                                    <img
-                                        src="/date.png"
-                                        alt="Date"
-                                        width={14}
-                                        height={14}
-                                    />
+                                <div className="flex items-center gap-1 justify-center sm:justify-start">
+                                    <img src="/date.png" alt="Date" className="w-4 h-4" />
                                     <span>
                                         {teacher.created_at
-                                            ? new Intl.DateTimeFormat("fr-FR", {
-                                                  month: "long",
-                                                  year: "numeric",
-                                              }).format(
-                                                  new Date(teacher.created_at),
-                                              )
+                                            ? new Intl.DateTimeFormat("fr-FR", { month: "long", year: "numeric" }).format(new Date(teacher.created_at))
                                             : "N/A"}
                                     </span>
                                 </div>
-                                <div className="w-full md:w-1/3 lg:w-full 2xl:w-1/3 flex items-center gap-2">
-                                    <img
-                                        src="/mail.png"
-                                        alt="E-mail"
-                                        width={14}
-                                        height={14}
-                                    />
+                                <a href={`mailto:${teacher.email}`} className="flex items-center gap-1 justify-center sm:justify-start text-blue-700 hover:underline py-1">
+                                    <img src="/mail.png" alt="E-mail" className="w-4 h-4" />
                                     <span>{teacher.email}</span>
-                                </div>
-                                <div className="w-full md:w-1/3 lg:w-full 2xl:w-1/3 flex items-center gap-2">
-                                    <img
-                                        src="/phone.png"
-                                        alt="Téléphone"
-                                        width={14}
-                                        height={14}
-                                    />
+                                </a>
+                                <a href={`tel:${teacher.phone_number}`} className="flex items-center gap-1 justify-center sm:justify-start text-blue-700 hover:underline py-1">
+                                    <img src="/phone.png" alt="Téléphone" className="w-4 h-4" />
                                     <span>{teacher.phone_number}</span>
-                                </div>
+                                </a>
                             </div>
                         </div>
                         {role === "admin" && (
@@ -246,12 +216,12 @@ const SingleTeacherPage = ({
                     </Suspense>
                 </div>
                 {/* BAS */}
-                <div className="mt-4 bg-white rounded-md p-4 h-[800px]">
+                {/* <div className="mt-4 bg-white rounded-md p-4 h-[800px]">
                     <h1>Emploi du temps de l'enseignant</h1>
                     <Suspense fallback={<span>Chargement...</span>}>
                         <BigCalendar />
                     </Suspense>
-                </div>
+                </div> */}
             </div>
 
             {/* DROITE */}
