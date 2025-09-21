@@ -25,12 +25,38 @@ class ClassesController extends Controller
         // Get the selected school from session
         $selectedSchoolId = session('school_id');
         
+        // Initialize teacher variable
+        $teacher = null;
+        if ($role === 'teacher') {
+            $teacher = Teacher::where('email', $user->email)->first();
+        }
+        
         // Base query with level relationship
         $classesQuery = Classes::with('level');
         
         // If a school is selected in the session, filter by that school
+        // For teachers, show classes from their school OR classes with no school assigned
         if ($selectedSchoolId) {
-            $classesQuery->where('school_id', $selectedSchoolId);
+            if ($role === 'teacher') {
+                $classesQuery->where(function($q) use ($selectedSchoolId) {
+                    $q->where('school_id', $selectedSchoolId)
+                      ->orWhereNull('school_id');
+                });
+                Log::info('Debug: School filtering for teacher', [
+                    'selected_school_id' => $selectedSchoolId,
+                    'filter_logic' => 'school_id = ' . $selectedSchoolId . ' OR school_id IS NULL'
+                ]);
+            } else {
+                $classesQuery->where('school_id', $selectedSchoolId);
+                Log::info('Debug: School filtering for admin/assistant', [
+                    'selected_school_id' => $selectedSchoolId,
+                    'filter_logic' => 'school_id = ' . $selectedSchoolId
+                ]);
+            }
+        } else {
+            Log::info('Debug: No school filtering applied', [
+                'selected_school_id' => null
+            ]);
         }
 
         // Apply search filter if search term is provided
@@ -54,31 +80,73 @@ class ClassesController extends Controller
         }
         
         // If user is a teacher, only show classes they teach
-        if ($role === 'teacher') {
-            // Find the teacher using email
-            $teacher = Teacher::where('email', $user->email)->first();
+        if ($role === 'teacher' && $teacher) {
+            // Debug: Check the teacher-class relationship
+            $teacherClasses = $teacher->classes;
+            $teacherClassIds = $teacherClasses->pluck('id')->toArray();
             
-            if ($teacher) {
-                // Filter to only get classes this teacher teaches at the selected school
-                $teacherClassIds = $teacher->classes->pluck('id')->toArray();
-                $classesQuery->whereIn('id', $teacherClassIds);
-            } else {
-                // If teacher record not found, return empty collection
-                return Inertia::render('Menu/ClassesPage', [
-                    'classes' => [],
-                    'levels' => $levels,
-                    'filters' => $request->only(['search', 'level', 'school']),
+            Log::info('Debug: Teacher classes relationship', [
+                'teacher_id' => $teacher->id,
+                'teacher_email' => $user->email,
+                'classes_count' => $teacherClasses->count(),
+                'class_ids' => $teacherClassIds,
+                'classes_data' => $teacherClasses->map(function($class) {
+                    return [
+                        'id' => $class->id,
+                        'name' => $class->name,
+                        'school_id' => $class->school_id
+                    ];
+                })
+            ]);
+            
+            // Also check the pivot table directly
+            $pivotData = DB::table('classes_teacher')->where('teacher_id', $teacher->id)->get();
+            Log::info('Debug: Pivot table data', [
+                    'teacher_id' => $teacher->id,
+                    'pivot_records_count' => $pivotData->count(),
+                    'pivot_data' => $pivotData->toArray()
                 ]);
-            }
+                
+            // Filter to only get classes this teacher teaches at the selected school
+            $classesQuery->whereIn('id', $teacherClassIds);
+        } elseif ($role === 'teacher' && !$teacher) {
+            // If teacher record not found, return empty collection
+            return Inertia::render('Menu/ClassesPage', [
+                'classes' => [],
+                'levels' => $levels,
+                'filters' => $request->only(['search', 'level', 'school']),
+            ]);
         }
         
         // Execute the query
         $classes = $classesQuery->get();
         
+        // Debug: Log the final results
+        Log::info('Debug: Classes query results', [
+            'user_role' => $role,
+            'teacher_id' => $role === 'teacher' ? ($teacher ? $teacher->id : null) : null,
+            'classes_count' => $classes->count(),
+            'classes_data' => $classes->map(function($class) {
+                return [
+                    'id' => $class->id,
+                    'name' => $class->name,
+                    'school_id' => $class->school_id
+                ];
+            })
+        ]);
+        
         // Update student and teacher counts for all classes
-        $classes->each(function ($class) {
-            $class->updateStudentCount();
+        $classes->each(function ($class) use ($role, $teacher) {
             $class->updateTeacherCount();
+            
+            // For teachers, calculate student count based on students they teach
+            if ($role === 'teacher' && $teacher) {
+                $teacherStudentCount = $this->getTeacherStudentCount($class, $teacher);
+                $class->number_of_students = $teacherStudentCount;
+            } else {
+                // For admins/assistants, use the regular count
+                $class->updateStudentCount();
+            }
         });
         
         return Inertia::render('Menu/ClassesPage', [
@@ -165,11 +233,41 @@ class ClassesController extends Controller
         $class->updateCounts();
         
         // Get students in this class
-        $students = DB::table('students')->where('classId', $class->id);
-        $studentsList = $students->get();
+        try {
+            if ($role === 'teacher' && isset($teacher)) {
+                // For teachers, only get students they teach
+                $studentsList = $this->getTeacherStudentsInClass($class, $teacher);
+            } else {
+                // For admins/assistants, get all students in the class
+                $students = DB::table('students')->where('classId', $class->id);
+                $studentsList = $students->get()->toArray();
+            }
+        } catch (\Exception $e) {
+            Log::error('Error getting students for class', [
+                'class_id' => $class->id,
+                'user_role' => $role,
+                'error' => $e->getMessage()
+            ]);
+            $studentsList = [];
+        }
+        
+        // Ensure studentsList is always an array
+        if (!is_array($studentsList)) {
+            $studentsList = [];
+        }
+        
+        // Debug: Log the students list format
+        Log::info('Debug: Students list format', [
+            'user_role' => $role,
+            'students_count' => is_countable($studentsList) ? count($studentsList) : 'not countable',
+            'students_type' => gettype($studentsList),
+            'students_class' => is_object($studentsList) ? get_class($studentsList) : 'not object',
+            'is_array' => is_array($studentsList),
+            'is_collection' => $studentsList instanceof \Illuminate\Support\Collection
+        ]);
         
         // Get student IDs for promotion data lookup
-        $studentIds = $studentsList->pluck('id')->toArray();
+        $studentIds = collect($studentsList)->pluck('id')->toArray();
         
         // First check if there's promotion data in the session (from setupPromotions redirect)
         $promotionData = session('promotionData', null);
@@ -190,9 +288,21 @@ class ClassesController extends Controller
             }
         }
         
+        
+        
+        // Ensure students is always an array
+        $studentsArray = is_array($studentsList) ? $studentsList : [];
+        
+        // Debug: Log the actual student data being passed to frontend
+        Log::info('Debug: Student data for frontend', [
+            'students_count' => count($studentsArray),
+            'students_data' => $studentsArray,
+            'first_student_keys' => count($studentsArray) > 0 ? array_keys((array)$studentsArray[0]) : 'no students'
+        ]);
+        
         return Inertia::render('Menu/SingleClassPage', [
             'class' => $class->load('level'), 
-            'students' => $studentsList,
+            'students' => $studentsArray,
             'Alllevels' => $levels,
             'Allclasses' => $classes,
             'className' => $class->name,
@@ -309,5 +419,93 @@ class ClassesController extends Controller
         }
         $classes = $query->get(['id', 'name']);
         return response()->json($classes);
+    }
+    
+    /**
+     * Get the count of students that a specific teacher teaches in a class
+     */
+    private function getTeacherStudentCount($class, $teacher)
+    {
+        // Get all students in the class
+        $classStudents = $class->students()->where('status', 'active')->get();
+        
+        // Filter to only include students taught by this teacher
+        $teacherStudents = $classStudents->filter(function ($student) use ($teacher) {
+            $memberships = $student->memberships()->get();
+            foreach ($memberships as $membership) {
+                $teacherArr = is_array($membership->teachers)
+                    ? $membership->teachers
+                    : json_decode($membership->teachers, true);
+                if (is_array($teacherArr)) {
+                    foreach ($teacherArr as $t) {
+                        if ((string)($t['teacherId'] ?? null) === (string)$teacher->id) {
+                            return true; // Student is taught by this teacher
+                        }
+                    }
+                }
+            }
+            return false; // Student is not taught by this teacher
+        });
+        
+        Log::info('Debug: Teacher student count calculation', [
+            'teacher_id' => $teacher->id,
+            'class_id' => $class->id,
+            'class_name' => $class->name,
+            'total_students_in_class' => $classStudents->count(),
+            'students_taught_by_teacher' => $teacherStudents->count()
+        ]);
+        
+        return $teacherStudents->count();
+    }
+    
+    /**
+     * Get the students that a specific teacher teaches in a class
+     */
+    private function getTeacherStudentsInClass($class, $teacher)
+    {
+        // Get all students in the class
+        $classStudents = $class->students()->where('status', 'active')->get();
+        
+        // Filter to only include students taught by this teacher
+        $teacherStudents = $classStudents->filter(function ($student) use ($teacher) {
+            $memberships = $student->memberships()->get();
+            foreach ($memberships as $membership) {
+                $teacherArr = is_array($membership->teachers)
+                    ? $membership->teachers
+                    : json_decode($membership->teachers, true);
+                if (is_array($teacherArr)) {
+                    foreach ($teacherArr as $t) {
+                        if ((string)($t['teacherId'] ?? null) === (string)$teacher->id) {
+                            return true; // Student is taught by this teacher
+                        }
+                    }
+                }
+            }
+            return false; // Student is not taught by this teacher
+        });
+        
+        Log::info('Debug: Teacher students in class', [
+            'teacher_id' => $teacher->id,
+            'class_id' => $class->id,
+            'class_name' => $class->name,
+            'total_students_in_class' => $classStudents->count(),
+            'students_taught_by_teacher' => $teacherStudents->count(),
+            'student_ids' => $teacherStudents->pluck('id')->toArray(),
+            'return_type' => get_class($teacherStudents)
+        ]);
+        
+        // Convert to array format that matches the DB query result
+        // Get student IDs first
+        $studentIds = $teacherStudents->pluck('id')->toArray();
+        
+        // Query the database directly to get the same format as admin path
+        $result = DB::table('students')
+            ->whereIn('id', $studentIds)
+            ->where('classId', $class->id)
+            ->get()
+            ->toArray();
+        
+        // Ensure we always return an array
+        return is_array($result) ? $result : [];
     }
 }

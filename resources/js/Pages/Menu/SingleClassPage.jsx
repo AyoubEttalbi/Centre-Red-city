@@ -26,15 +26,18 @@ export default function SingleClassPage({
     const [showPromotionSetup, setShowPromotionSetup] = useState(false);
 
     const columns = [
-        { header: "Infos", accessor: "info" },
         {
-            header: "ID Élève",
+            header: "Info",
+            accessor: "info",
+        },
+        {
+            header: "ID de l'élève",
             accessor: "studentId",
             className: "hidden md:table-cell",
         },
         {
-            header: "Niveau",
-            accessor: "grade",
+            header: "Classe",
+            accessor: "class",
             className: "hidden md:table-cell",
         },
         {
@@ -47,7 +50,16 @@ export default function SingleClassPage({
             accessor: "address",
             className: "hidden lg:table-cell",
         },
-        { header: "Actions", accessor: "action" },
+        {
+            header: "Statut d'adhésion",
+            accessor: "membershipStatus",
+            className: "hidden lg:table-cell",
+        },
+        ...(role !== "teacher" ? [{
+            header: "Actions",
+            accessor: "action",
+            className: "text-center",
+        }] : []),
     ];
 
     const handlePromotionSetupClose = (success) => {
@@ -73,8 +85,12 @@ export default function SingleClassPage({
             >
                 <td className="flex items-center gap-4 p-4">
                     <img
-                        src="/studentProfile.png"
-                        alt=""
+                        src={
+                            item.profile_image
+                                ? item.profile_image
+                                : "/studentProfile.png"
+                        }
+                        alt={item.firstName + ' ' + item.lastName}
                         width={40}
                         height={40}
                         className="md:hidden xl:block w-10 h-10 rounded-full object-cover"
@@ -102,39 +118,47 @@ export default function SingleClassPage({
                         )}
                     </div>
                 </td>
-                <td className="hidden md:table-cell">{item.massarCode}</td>
+                <td className="hidden md:table-cell">{item.id}</td>
                 <td className="hidden md:table-cell">
-                    {Alllevels.find((level) => level.id === item.levelId)?.name}
+                    {Allclasses.find((group) => group.id === item.classId)?.name}
                 </td>
-                <td className="hidden md:table-cell">{item.phoneNumber}</td>
-                <td className="hidden md:table-cell">{item.address}</td>
-                <td>
-                    <div className="flex items-center gap-2">
-                        <Link href={`/students/${item.id}`}>
-                            <button className="w-7 h-7 flex items-center justify-center rounded-full bg-lamaSky">
-                                <Eye className="w-4 h-4 text-white" />
-                            </button>
-                        </Link>
-                        {role === "admin" && (
-                            <>
-                                <FormModal
-                                    table="student"
-                                    type="update"
-                                    data={item}
-                                    levels={Alllevels}
-                                    classes={Allclasses}
-                                    schools={Allschools}
-                                />
-                                <FormModal
-                                    table="student"
-                                    type="delete"
-                                    id={item.id}
-                                    route="students"
-                                />
-                            </>
-                        )}
+                <td className="hidden lg:table-cell">{item.guardianNumber}</td>
+                <td className="hidden lg:table-cell">{item.address}</td>
+                <td className="hidden lg:table-cell w-1/12">
+                    {/* Membership status - simplified version */}
+                    <div className="text-sm text-gray-600">
+                        {item.status === 'active' ? 'Actif' : 'Inactif'}
                     </div>
                 </td>
+                {role !== "teacher" && (
+                    <td>
+                        <div className="flex items-center gap-2">
+                            <Link href={`/students/${item.id}`}>
+                                <button className="w-7 h-7 flex items-center justify-center rounded-full bg-lamaSky">
+                                    <Eye className="w-4 h-4 text-white" />
+                                </button>
+                            </Link>
+                            {role === "admin" && (
+                                <>
+                                    <FormModal
+                                        table="student"
+                                        type="update"
+                                        data={item}
+                                        levels={Alllevels}
+                                        classes={Allclasses}
+                                        schools={Allschools}
+                                    />
+                                    <FormModal
+                                        table="student"
+                                        type="delete"
+                                        id={item.id}
+                                        route="students"
+                                    />
+                                </>
+                            )}
+                        </div>
+                    </td>
+                )}
             </tr>
         );
     };
@@ -190,7 +214,7 @@ export default function SingleClassPage({
                 isOpen={showPromotionSetup}
                 onClose={handlePromotionSetupClose}
             />
-            <Table columns={columns} renderRow={renderRow} data={students} />
+            <Table columns={columns} renderRow={renderRow} data={Array.isArray(students) ? students : []} />
             <Pagination />
         </div>
     );

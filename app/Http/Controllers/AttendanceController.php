@@ -95,6 +95,14 @@ class AttendanceController extends Controller
                 Log::debug('Filtering students by search', ['search' => $search]);
             }
             
+            // If user is a teacher, optimize by only fetching students with teacher relationship
+            if ($request->user()->role === 'teacher' && $currentTeacherId) {
+                $studentsQuery->whereHas('memberships', function($membershipQuery) use ($currentTeacherId) {
+                    $membershipQuery->whereRaw("JSON_CONTAINS(teachers, JSON_OBJECT('teacherId', ?))", [$currentTeacherId]);
+                });
+                Log::debug('Optimized student query for teacher', ['teacher_id' => $currentTeacherId]);
+            }
+            
             $students = $studentsQuery->get();
             Log::debug('Students found', ['count' => $students->count()]);
         } else {
@@ -159,57 +167,29 @@ class AttendanceController extends Controller
             ]);
         }
 
-        // Filter students to only include those taught by the current teacher
-        $filteredStudents = $students->filter(function ($student) use ($currentTeacherId) {
-            if (!$currentTeacherId) {
-                Log::debug('No current teacher ID, skipping student', [
-                    'student_id' => $student->id,
-                    'student_name' => $student->firstName . ' ' . $student->lastName
-                ]);
-                return false;
-            }
-            
-            // Include all memberships regardless of membership active status; rely on student status instead
-            $memberships = $student->memberships()->get();
-            Log::debug('Checking student memberships', [
-                'student_id' => $student->id,
-                'student_name' => $student->firstName . ' ' . $student->lastName,
-                'memberships_count' => $memberships->count(),
-                'teacher_id' => $currentTeacherId
-            ]);
-            
-            foreach ($memberships as $membership) {
-                $teacherArr = is_array($membership->teachers)
-                    ? $membership->teachers
-                    : json_decode($membership->teachers, true);
-                if (is_array($teacherArr)) {
-                    foreach ($teacherArr as $t) {
-                        if ((string)($t['teacherId'] ?? null) === (string)$currentTeacherId) {
-                            Log::debug('Student is taught by teacher', [
-                                'student_id' => $student->id,
-                                'student_name' => $student->firstName . ' ' . $student->lastName,
-                                'teacher_id' => $currentTeacherId,
-                                'membership_id' => $membership->id,
-                                'teacher_data' => $t
-                            ]);
-                            return true; // Student is taught by this teacher
+        // For teachers, students are already filtered at query level, so no additional filtering needed
+        // For admins/assistants, we still need to filter by teacher relationship if teacher_id is provided
+        if ($request->user()->role !== 'teacher' && $currentTeacherId) {
+            $filteredStudents = $students->filter(function ($student) use ($currentTeacherId) {
+                $memberships = $student->memberships()->get();
+                foreach ($memberships as $membership) {
+                    $teacherArr = is_array($membership->teachers)
+                        ? $membership->teachers
+                        : json_decode($membership->teachers, true);
+                    if (is_array($teacherArr)) {
+                        foreach ($teacherArr as $t) {
+                            if ((string)($t['teacherId'] ?? null) === (string)$currentTeacherId) {
+                                return true; // Student is taught by this teacher
+                            }
                         }
                     }
                 }
-            }
-            Log::debug('Student is NOT taught by teacher', [
-                'student_id' => $student->id,
-                'student_name' => $student->firstName . ' ' . $student->lastName,
-                'teacher_id' => $currentTeacherId,
-                'memberships_data' => $memberships->map(function($m) {
-                    return [
-                        'id' => $m->id,
-                        'teachers' => $m->teachers
-                    ];
-                })
-            ]);
-            return false; // Student is not taught by this teacher
-        });
+                return false; // Student is not taught by this teacher
+            });
+        } else {
+            // For teachers, all fetched students already have the relationship
+            $filteredStudents = $students;
+        }
 
         Log::info('Student filtering results', [
             'total_students_in_class' => $students->count(),
@@ -217,7 +197,8 @@ class AttendanceController extends Controller
             'teacher_id' => $currentTeacherId,
             'class_id' => $classId,
             'user_role' => $request->user()->role,
-            'user_email' => $request->user()->email
+            'user_email' => $request->user()->email,
+            'optimization_applied' => $request->user()->role === 'teacher'
         ]);
 
         $studentsWithAttendance = $filteredStudents->map(function ($student) use ($existingAttendances, $date, $currentTeacherId, $selectedSubject) {

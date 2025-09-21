@@ -123,6 +123,46 @@ class StudentsController extends Controller
          // Initialize the query with eager loading for relationships
          $query = Student::with(['class', 'school', 'level', 'memberships']);
          
+         // Get the current user and their role
+         $user = $request->user();
+         $userRole = $user ? $user->role : null;
+         
+         // If user is a teacher, only show students they teach
+         if ($userRole === 'teacher') {
+             $teacher = \App\Models\Teacher::where('email', $user->email)->first();
+             if ($teacher) {
+                 // Debug: Check what memberships exist for this teacher
+                 $debugMemberships = \App\Models\Membership::where(function($q) use ($teacher) {
+                     $q->whereRaw("JSON_CONTAINS(teachers, JSON_OBJECT('teacherId', ?))", [$teacher->id])
+                       ->orWhereRaw("JSON_CONTAINS(teachers, JSON_OBJECT('teacherId', ?))", [(string)$teacher->id]);
+                 })->get();
+                 Log::info('Debug: Memberships found for teacher', [
+                     'teacher_id' => $teacher->id,
+                     'teacher_email' => $user->email,
+                     'memberships_count' => $debugMemberships->count(),
+                     'memberships_data' => $debugMemberships->map(function($m) {
+                         return [
+                             'id' => $m->id,
+                             'student_id' => $m->student_id,
+                             'teachers' => $m->teachers
+                         ];
+                     })
+                 ]);
+                 
+                 $query->whereHas('memberships', function($membershipQuery) use ($teacher) {
+                     // Try both string and integer versions of teacher ID
+                     $membershipQuery->where(function($q) use ($teacher) {
+                         $q->whereRaw("JSON_CONTAINS(teachers, JSON_OBJECT('teacherId', ?))", [$teacher->id])
+                           ->orWhereRaw("JSON_CONTAINS(teachers, JSON_OBJECT('teacherId', ?))", [(string)$teacher->id]);
+                     });
+                 });
+                 Log::info('Filtering students for teacher', [
+                     'teacher_id' => $teacher->id,
+                     'teacher_email' => $user->email
+                 ]);
+             }
+         }
+         
          // Get the selected school from session and apply filter
          $selectedSchoolId = session('school_id');
          if ($selectedSchoolId) {
@@ -144,6 +184,15 @@ class StudentsController extends Controller
          // Membership status filter
          $membershipStatus = $request->input('membership_status');
          $studentsCollection = $query->orderBy('created_at', 'desc')->get();
+         
+         // Debug: Log how many students were found
+         Log::info('Debug: Students found after query', [
+             'user_role' => $userRole,
+             'teacher_id' => $userRole === 'teacher' ? ($teacher ? $teacher->id : null) : null,
+             'students_count' => $studentsCollection->count(),
+             'query_sql' => $query->toSql(),
+             'query_bindings' => $query->getBindings()
+         ]);
          if ($membershipStatus && $membershipStatus !== 'all') {
              $studentsCollection = $studentsCollection->filter(function ($student) use ($membershipStatus) {
                  $allMemberships = $student->memberships;
