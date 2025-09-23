@@ -27,17 +27,42 @@ return new class extends Migration
             )
         ');
 
-        // Add constraint to prevent future inconsistencies
+        // Create a trigger to enforce offer consistency
+        // This approach works with MySQL as it doesn't use subqueries in constraints
         DB::statement('
-            ALTER TABLE invoices 
-            ADD CONSTRAINT check_offer_consistency 
-            CHECK (
-                offer_id = (
-                    SELECT offer_id 
-                    FROM memberships 
-                    WHERE memberships.id = invoices.membership_id
-                )
-            )
+            CREATE TRIGGER check_offer_consistency_before_insert
+            BEFORE INSERT ON invoices
+            FOR EACH ROW
+            BEGIN
+                DECLARE membership_offer_id INT;
+                
+                SELECT offer_id INTO membership_offer_id
+                FROM memberships 
+                WHERE id = NEW.membership_id;
+                
+                IF NEW.offer_id IS NOT NULL AND NEW.offer_id != membership_offer_id THEN
+                    SIGNAL SQLSTATE "45000" 
+                    SET MESSAGE_TEXT = "Invoice offer_id must match membership offer_id";
+                END IF;
+            END
+        ');
+
+        DB::statement('
+            CREATE TRIGGER check_offer_consistency_before_update
+            BEFORE UPDATE ON invoices
+            FOR EACH ROW
+            BEGIN
+                DECLARE membership_offer_id INT;
+                
+                SELECT offer_id INTO membership_offer_id
+                FROM memberships 
+                WHERE id = NEW.membership_id;
+                
+                IF NEW.offer_id IS NOT NULL AND NEW.offer_id != membership_offer_id THEN
+                    SIGNAL SQLSTATE "45000" 
+                    SET MESSAGE_TEXT = "Invoice offer_id must match membership offer_id";
+                END IF;
+            END
         ');
     }
 
@@ -46,6 +71,7 @@ return new class extends Migration
      */
     public function down(): void
     {
-        DB::statement('ALTER TABLE invoices DROP CONSTRAINT check_offer_consistency');
+        DB::statement('DROP TRIGGER IF EXISTS check_offer_consistency_before_insert');
+        DB::statement('DROP TRIGGER IF EXISTS check_offer_consistency_before_update');
     }
 };
