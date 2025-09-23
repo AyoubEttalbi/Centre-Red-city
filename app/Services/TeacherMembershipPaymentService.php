@@ -131,9 +131,17 @@ class TeacherMembershipPaymentService
                 $immediateWalletAmount = round(($partialMonthAmount * $teacherPercentage / 100), 2);
             } else {
                 // Current month is selected but no specific partial amount, means full month paid immediately
-                $allSelectedMonthsCount = count($selectedMonths);
-                $actualMonthlyShare = $allSelectedMonthsCount > 0 ? round(($totalTeacherAmount / $allSelectedMonthsCount), 2) : 0;
-                $immediateWalletAmount = $actualMonthlyShare;
+                // Use the same logic as frontend: if includePartialMonth is true but partialMonthAmount is 0,
+                // still use the partial month logic with the full amount
+                if (($validated['includePartialMonth'] ?? false)) {
+                    // Even if partialMonthAmount is 0, use the full amountPaid for partial month calculation
+                    $immediateWalletAmount = round(($studentTotalPaidCumulative * $teacherPercentage / 100), 2);
+                } else {
+                    // No partial month, use normal division
+                    $allSelectedMonthsCount = count($selectedMonths);
+                    $actualMonthlyShare = $allSelectedMonthsCount > 0 ? round(($totalTeacherAmount / $allSelectedMonthsCount), 2) : 0;
+                    $immediateWalletAmount = $actualMonthlyShare;
+                }
             }
         }
 

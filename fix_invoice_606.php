@@ -1,6 +1,5 @@
-<?php
 // Fix for Invoice 606 - Manual processing of partial month payment
-// Run this in your Laravel tinker or as a one-time script
+// Run this in your Laravel tinker
 
 use App\Models\Invoice;
 use App\Services\TeacherMembershipPaymentService;
@@ -39,6 +38,15 @@ if ($existingPayments->count() > 0) {
         'includePartialMonth' => $invoice->includePartialMonth,
         'partialMonthAmount' => $invoice->partialMonthAmount,
         'selected_months' => $invoice->selected_months,
+        'totalAmount' => $invoice->totalAmount,
+        'amountPaid' => $invoice->amountPaid,
+        'rest' => $invoice->rest,
+        'billDate' => $invoice->billDate,
+        'endDate' => $invoice->endDate,
+        'months' => $invoice->months,
+        'offer_id' => $invoice->offer_id,
+        'student_id' => $invoice->student_id,
+        'membership_id' => $invoice->membership_id,
     ];
     
     // Process the payment

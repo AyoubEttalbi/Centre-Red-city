@@ -147,6 +147,18 @@ class InvoiceController extends Controller
             $membership = Membership::withTrashed()->findOrFail($validated['membership_id']);
             // Always set offer_id from membership
             $validated['offer_id'] = $membership->offer_id;
+            
+            // Additional validation: Ensure offer_id matches membership
+            if (isset($validated['offer_id']) && $validated['offer_id'] != $membership->offer_id) {
+                Log::warning('Offer ID mismatch detected during invoice creation', [
+                    'invoice_offer_id' => $validated['offer_id'],
+                    'membership_offer_id' => $membership->offer_id,
+                    'membership_id' => $membership->id,
+                    'student_id' => $membership->student_id
+                ]);
+                // Force correct offer_id from membership
+                $validated['offer_id'] = $membership->offer_id;
+            }
 
             // Create the invoice
             $invoice = Invoice::create($validated);

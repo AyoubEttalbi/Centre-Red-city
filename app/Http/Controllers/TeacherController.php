@@ -549,8 +549,21 @@ class TeacherController extends Controller
                     // Calculate total teacher earnings from amountPaid
                     $totalTeacherAmount = $invoice->amountPaid * ($teacherPercentage / 100);
                     
-                    // Calculate monthly amount
-                    $monthlyAmount = count($selectedMonths) > 0 ? $totalTeacherAmount / count($selectedMonths) : 0;
+                    // Calculate monthly amount using includePartialMonth logic
+                    $monthlyAmount = 0;
+                    if (count($selectedMonths) > 0) {
+                        // Check if this invoice has includePartialMonth
+                        $includePartialMonth = $invoice->includePartialMonth ?? false;
+                        $partialMonthAmount = $invoice->partialMonthAmount ?? 0;
+                        
+                        if ($includePartialMonth && $partialMonthAmount > 0) {
+                            // Use partial month amount for each month
+                            $monthlyAmount = $partialMonthAmount * ($teacherPercentage / 100);
+                        } else {
+                            // Use full amount divided by months
+                            $monthlyAmount = $totalTeacherAmount / count($selectedMonths);
+                        }
+                    }
                     
                     // Create one row per month
                     $monthlyInvoices = [];

@@ -22,6 +22,9 @@ class Kernel extends ConsoleKernel
         // Schedule teacher monthly payments to run on the 1st of each month at 2 AM
         $schedule->command('teachers:process-monthly-payments')->monthlyOn(1, '02:00');
         
+        // Schedule offer consistency check to run daily at 4 AM
+        $schedule->command('invoices:check-offer-consistency')->dailyAt('04:00');
+        
         // Clean up old stats monthly on the 1st at 3 AM
         $schedule->call(function () {
             $service = new MembershipStatsService();
