@@ -28,10 +28,6 @@ class TeacherMembershipPaymentService
         if (is_string($selectedMonths)) {
             $selectedMonths = json_decode($selectedMonths, true) ?? [];
         }
-        if (empty($selectedMonths)) {
-            // Fallback: if no selected_months, use the billDate month
-            $selectedMonths = [$invoice->billDate ? $invoice->billDate->format('Y-m') : null];
-        }
 
         // If partial month is included, automatically add current month to selected months
         $currentMonth = now()->format('Y-m');
@@ -41,6 +37,11 @@ class TeacherMembershipPaymentService
                 // Sort months chronologically
                 sort($selectedMonths);
             }
+        }
+
+        // Fallback: if no selected_months after processing partial month, use the billDate month
+        if (empty($selectedMonths)) {
+            $selectedMonths = [$invoice->billDate ? $invoice->billDate->format('Y-m') : null];
         }
 
         // Calculate the percentage of the amount paid (cumulatively for the invoice) to the total invoice amount

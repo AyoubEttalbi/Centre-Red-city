@@ -54,6 +54,10 @@ The application is feature-rich, covering all major aspects of school management
     *   Includes an absence log, reporting features, and an automated system to notify parents of an absence via WhatsApp (`WasenderApi`).
 *   **School Year Lifecycle:**
     *   The `NextYearController` provides functionality to manage the transition between academic years, including a system for promoting students to the next level.
+*   **Console Commands & Automation:**
+    *   **Payment Processing:** `ProcessTeacherMonthlyPayments` command handles automated monthly teacher payments via Laravel scheduler.
+    *   **Membership Management:** Commands for updating payment status, membership stats, and fixing end dates.
+    *   **Data Cleanup:** Automated cleanup of old statistics and maintenance tasks.
 
 #### Financial Management
 *   **Invoicing & Payments:**
@@ -92,6 +96,29 @@ The application is feature-rich, covering all major aspects of school management
     *   Math Teacher (30%): Receives 100 DH immediately for January, 100 DH each for February and March (scheduled)
     *   Science Teacher (20%): Receives 66.67 DH immediately for January, 66.67 DH each for February and March (scheduled)
 
+*   **Technical Implementation Details:**
+    *   **Database Schema:** Uses `teacher_membership_payments` table to track payment records with fields like `selected_months`, `months_rest_not_paid_yet`, `monthly_teacher_amount`, `immediate_wallet_amount`, and `total_paid_to_teacher`.
+    *   **Payment Calculation Logic:** 
+        - Total teacher amount = `(student_total_paid_cumulative × teacher_percentage / 100)`
+        - Immediate amount = `(partial_month_amount × teacher_percentage / 100)` for partial months, or `(total_teacher_amount / selected_months_count)` for full months
+        - Monthly amount = `(remaining_amount_for_future_months / future_months_count)`
+    *   **Scheduled Job Configuration:** 
+        - Command: `teachers:process-monthly-payments`
+        - Schedule: Monthly on 1st at 2:00 AM
+        - Location: `bootstrap/app.php` and `app/Console/Kernel.php`
+    *   **Payment Reversal Logic:** 
+        - Automatic wallet decrements when invoices are updated/deleted
+        - Sophisticated logic prevents over-payment with time-based reversal rules
+        - Records remain active even when fully paid for potential updates
+    *   **Multi-Invoice Support:** 
+        - Handles multiple invoices per membership
+        - Merges selected months from new payments with existing records
+        - Recalculates amounts when additional payments are made
+    *   **Logging & Monitoring:** 
+        - Comprehensive debug logging for payment processing
+        - Detailed transaction tracking for audit purposes
+        - Error handling with database rollbacks
+
 #### Communication & Real-time Features
 *   **Internal Messaging:**
     *   A built-in inbox for one-to-one communication between users, complete with read receipts and unread message
@@ -108,7 +135,8 @@ The application is feature-rich, covering all major aspects of school management
 The project follows a modern, tightly-integrated monolithic architecture. It masterfully combines the power of a server-side framework with the fluidity of a client-side SPA, with Inertia.js acting as the critical link.
 
 *   **Backend (Laravel):**
-    *   Laravel serves as the robust PHP backend, handling all core business logic. It manages database interactions via its **Eloquent ORM** (e.g., `Student`, `Teacher`, `Invoice` models), handles user authentication, dispatches jobs to queues (like sending WhatsApp messages via `SendMessage`), defines application routes, and processes all incoming requests in its **Controllers**.
+    *   Laravel serves as the robust PHP backend, handling all core business logic. It manages database interactions via its **Eloquent ORM** (e.g., `Student`, `Teacher`, `Invoice`, `TeacherMembershipPayment` models), handles user authentication, dispatches jobs to queues (like sending WhatsApp messages via `SendMessage`), defines application routes, and processes all incoming requests in its **Controllers**.
+    *   **Key Services:** The `TeacherMembershipPaymentService` handles complex payment distribution logic, while `MembershipStatsService` manages membership analytics and `StudentMovementService` tracks student enrollment changes.
 
 *   **Frontend (React & Inertia.js):**
     *   The frontend is a true **Single-Page Application** built with React, located in `resources/js/`. User interactions (like filling a form or clicking a link) are captured by Inertia's frontend adapter (`@inertiajs/react`).
@@ -132,7 +160,7 @@ The project follows a modern, tightly-integrated monolithic architecture. It mas
 | **Styling** | Tailwind CSS, Material UI (`@mui/material`), Headless UI, Radix UI, `lucide-react` (icons) |
 | **State & Forms** | React Hook Form, Zod (schema validation) |
 | **Data Viz & Utils** | Chart.js, Recharts, date-fns, `react-big-calendar`, `xlsx` (Excel), `qrcode.react` |
-| **Key Backend Packages** | `barryvdh/laravel-dompdf` (PDFs), `wasenderapi/wasenderapi-laravel` (WhatsApp), `spatie/laravel-activitylog`, `tightenco/ziggy`, `cloudinary/cloudinary_php` (Image/Video Mgmt) |
+| **Key Backend Packages** | `barryvdh/laravel-dompdf` (PDFs), `wasenderapi/wasenderapi-laravel` (WhatsApp), `spatie/laravel-activitylog`, `tightenco/ziggy`, `cloudinary/cloudinary_php` (Image/Video Mgmt), `ta-tikoma/ta-tikoma-laravel` (Custom Package) |
 | **Real-time** | `laravel-echo`, `pusher-js` (client-side listeners for Reverb) |
 
 ---
