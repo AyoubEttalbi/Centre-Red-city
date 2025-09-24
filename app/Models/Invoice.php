@@ -57,4 +57,10 @@ class Invoice extends Model
     {
         return $this->belongsTo(Offer::class, 'offer_id');
     }
+    
+    // Relationship with TeacherMembershipPayments
+    public function teacherMembershipPayments()
+    {
+        return $this->hasMany(TeacherMembershipPayment::class, 'invoice_id');
+    }
 }

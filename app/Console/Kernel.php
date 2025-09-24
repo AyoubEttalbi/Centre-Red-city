@@ -25,6 +25,9 @@ class Kernel extends ConsoleKernel
         // Schedule offer consistency check to run daily at 4 AM
         $schedule->command('invoices:check-offer-consistency')->dailyAt('04:00');
         
+        // Schedule payment consistency check to run daily at 5 AM
+        $schedule->command('payments:check-consistency --fix')->dailyAt('05:00');
+        
         // Clean up old stats monthly on the 1st at 3 AM
         $schedule->call(function () {
             $service = new MembershipStatsService();

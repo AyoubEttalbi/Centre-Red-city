@@ -57,6 +57,9 @@ return Application::configure(basePath: dirname(__DIR__))
         // Weekly monitoring: Fix any membership inconsistencies every Sunday at 2 AM
         $schedule->command('memberships:fix-end-dates')->weekly()->sundays()->at('02:00');
         
+        // Schedule payment consistency check to run daily at 5 AM
+        // $schedule->command('payments:check-consistency --fix')->dailyAt('05:00');
+
         // Clean up old stats monthly on the 1st at 3 AM
         $schedule->call(function () {
             $service = new \App\Services\MembershipStatsService();

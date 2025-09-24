@@ -18,10 +18,19 @@ class TeacherMembershipPaymentService
      */
     public function processInvoicePayment(Invoice $invoice, array $validated)
     {
-        $membership = $invoice->membership;
-        if (!$membership || !is_array($membership->teachers)) {
-            return;
-        }
+        $result = [
+            'success' => false,
+            'created_records' => 0,
+            'updated_records' => 0,
+            'errors' => []
+        ];
+
+        try {
+            $membership = $invoice->membership;
+            if (!$membership || !is_array($membership->teachers)) {
+                $result['errors'][] = 'No membership or teachers found for invoice ' . $invoice->id;
+                return $result;
+            }
 
         // Get selected months
         $selectedMonths = $invoice->selected_months ?? [];
@@ -88,6 +97,31 @@ class TeacherMembershipPaymentService
                 round((float)($validated['partialMonthAmount'] ?? 0), 2)
             );
         }
+        
+        // Validate that payment records were created
+        $createdRecords = TeacherMembershipPayment::where('invoice_id', $invoice->id)->count();
+        if ($createdRecords === 0) {
+            $result['errors'][] = 'No payment records were created for invoice ' . $invoice->id;
+            Log::error('No payment records created', ['invoice_id' => $invoice->id]);
+        } else {
+            $result['success'] = true;
+            $result['created_records'] = $createdRecords;
+            Log::info('Payment records created successfully', [
+                'invoice_id' => $invoice->id,
+                'created_records' => $createdRecords
+            ]);
+        }
+        
+        } catch (\Exception $e) {
+            $result['errors'][] = $e->getMessage();
+            Log::error('Error in payment processing', [
+                'invoice_id' => $invoice->id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+        }
+        
+        return $result;
     }
 
     /**
@@ -218,6 +252,60 @@ class TeacherMembershipPaymentService
                 $validated
             );
         }
+    }
+
+    /**
+     * Reactivate payment records for fully paid invoices
+     */
+    public function reactivatePaymentRecords(Invoice $invoice)
+    {
+        $result = [
+            'success' => false,
+            'reactivated_records' => 0,
+            'errors' => []
+        ];
+
+        try {
+            // Only reactivate if invoice is fully paid
+            if ($invoice->amountPaid < $invoice->totalAmount) {
+                $result['errors'][] = 'Invoice is not fully paid (amountPaid: ' . $invoice->amountPaid . ', totalAmount: ' . $invoice->totalAmount . ')';
+                return $result;
+            }
+
+            $records = TeacherMembershipPayment::where('invoice_id', $invoice->id)
+                ->where('is_active', false)
+                ->get();
+
+            foreach ($records as $record) {
+                $record->update([
+                    'is_active' => true,
+                    'months_rest_not_paid_yet' => [] // Clear unpaid months for fully paid invoices
+                ]);
+
+                Log::info('Reactivated payment record', [
+                    'record_id' => $record->id,
+                    'invoice_id' => $invoice->id,
+                    'teacher_id' => $record->teacher_id
+                ]);
+            }
+
+            $result['success'] = true;
+            $result['reactivated_records'] = $records->count();
+
+            Log::info('Payment records reactivated', [
+                'invoice_id' => $invoice->id,
+                'reactivated_count' => $records->count()
+            ]);
+
+        } catch (\Exception $e) {
+            $result['errors'][] = $e->getMessage();
+            Log::error('Error reactivating payment records', [
+                'invoice_id' => $invoice->id,
+                'error' => $e->getMessage()
+            ]);
+        }
+
+        return $result;
     }
 
     /**
