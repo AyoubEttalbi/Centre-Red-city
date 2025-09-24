@@ -145,7 +145,22 @@ class TeacherMembershipPaymentService
         $offer = $membership->offer;
         $teacherSubject = $teacherData['subject'] ?? null;
 
+        // If subject is not provided in teacherData, try to map it from offer percentages
+        if (!$teacherSubject && $offer && is_array($offer->percentage)) {
+            $subjects = array_keys($offer->percentage);
+            $teacherIndex = array_search($teacherData['teacherId'], array_column($membership->teachers, 'teacherId'));
+            if ($teacherIndex !== false && isset($subjects[$teacherIndex])) {
+                $teacherSubject = $subjects[$teacherIndex];
+            }
+        }
+
         if (!$offer || !$teacherSubject || !is_array($offer->percentage)) {
+            Log::warning('Cannot process teacher payment - missing subject or offer data', [
+                'teacher_id' => $teacherData['teacherId'],
+                'teacher_subject' => $teacherSubject,
+                'offer_id' => $offer->id ?? null,
+                'membership_id' => $membership->id
+            ]);
             return;
         }
 
