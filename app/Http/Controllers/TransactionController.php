@@ -2158,10 +2158,21 @@ public function processMonthRecurringTransactions(Request $request)
                 // Get teacher percentage from offer
                 $teacherPercentage = $offer->percentage[$teacherSubject] ?? 0;
                 
-                // Calculate teacher earnings from amountPaid
-                $teacherAmountFromPaid = $invoice->amountPaid * ($teacherPercentage / 100);
+                // Calculate teacher earnings per month (respect partial-month logic like TeacherController)
+                $totalTeacherAmount = $invoice->amountPaid * ($teacherPercentage / 100);
                 $monthsCount = count($selectedMonths);
-                $earningsPerMonth = $monthsCount > 0 ? $teacherAmountFromPaid / $monthsCount : 0;
+                $earningsPerMonth = 0;
+                if ($monthsCount > 0) {
+                    $includePartialMonth = $invoice->includePartialMonth ?? false;
+                    $partialMonthAmount = $invoice->partialMonthAmount ?? 0;
+                    if ($includePartialMonth && $partialMonthAmount > 0) {
+                        // Use partial month amount for each month
+                        $earningsPerMonth = $partialMonthAmount * ($teacherPercentage / 100);
+                    } else {
+                        // Split the total across all selected months
+                        $earningsPerMonth = $totalTeacherAmount / $monthsCount;
+                    }
+                }
                 
                 // Distribute earnings across all selected months
                 foreach ($selectedMonths as $selectedMonth) {
@@ -2289,10 +2300,20 @@ public function processMonthRecurringTransactions(Request $request)
                             // Get teacher percentage from offer
                             $teacherPercentage = $offer->percentage[$teacherSubject] ?? 0;
                             
-                            // Calculate teacher earnings from amountPaid
-                            $teacherAmountFromPaid = $invoice->amountPaid * ($teacherPercentage / 100);
+                            // Calculate teacher earnings per month (respect partial-month logic like TeacherController)
+                            $totalTeacherAmount = $invoice->amountPaid * ($teacherPercentage / 100);
                             $monthsCount = count($selectedMonths);
-                            $teacherShare = $monthsCount > 0 ? $teacherAmountFromPaid / $monthsCount : 0;
+                            if ($monthsCount > 0) {
+                                $includePartialMonth = $invoice->includePartialMonth ?? false;
+                                $partialMonthAmount = $invoice->partialMonthAmount ?? 0;
+                                if ($includePartialMonth && $partialMonthAmount > 0) {
+                                    $teacherShare = $partialMonthAmount * ($teacherPercentage / 100);
+                                } else {
+                                    $teacherShare = $totalTeacherAmount / $monthsCount;
+                                }
+                            } else {
+                                $teacherShare = 0;
+                            }
                             break;
                         }
                     }

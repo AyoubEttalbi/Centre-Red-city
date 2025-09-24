@@ -311,12 +311,22 @@ class InvoiceController extends Controller
             }
         }
 
+        // Ensure creationDate is returned as 'Y-m-d' (no timezone) to make client parsing deterministic
+        $creationDateFormatted = null;
+        if ($invoice->creationDate) {
+            try {
+                $creationDateFormatted = $invoice->creationDate->format('Y-m-d');
+            } catch (\Exception $e) {
+                $creationDateFormatted = (string) $invoice->creationDate;
+            }
+        }
+
         $data = [
             'id' => $invoice->id,
             'membership_id' => $invoice->membership_id,
             'months' => $invoice->months,
             'billDate' => $invoice->billDate,
-            'creationDate' => $invoice->creationDate,
+            'creationDate' => $creationDateFormatted,
             'totalAmount' => is_numeric($invoice->totalAmount) ? floatval($invoice->totalAmount) : 0,
             'amountPaid' => is_numeric($invoice->amountPaid) ? floatval($invoice->amountPaid) : 0,
             'rest' => is_numeric($invoice->rest) ? floatval($invoice->rest) : 0,

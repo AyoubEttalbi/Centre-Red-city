@@ -41,9 +41,37 @@ const InvoicesForm = ({
     StudentMemberships = [],
     studentId,
 }) => {
-    // ...existing code...
+    
+    console.log(data);
     const today = new Date();
     const todayFormatted = formatDateToYYYYMMDD(today);
+    // Use invoice creation date as the base when updating an existing invoice
+    // so partial month calculations are based on the invoice creation moment
+    // (instead of the current date). Fall back to today when creationDate
+    // is not available (e.g. on create).
+    const effectiveDate = (() => {
+        if (type === 'update') {
+            const creationVal = data?.creationDate || data?.created_at || data?.createdAt;
+            if (creationVal) {
+                try {
+                    // Parse only the YYYY-MM-DD portion to avoid timezone shifts
+                    const dateStr = String(creationVal).slice(0, 10); // e.g. '2025-09-22'
+                    const parts = dateStr.split('-').map(Number);
+                    if (parts.length === 3 && parts.every((n) => Number.isFinite(n))) {
+                        const [y, m, d] = parts;
+                        // Construct a local Date at midnight for that date (avoids UTC timezone shift)
+                        return new Date(y, m - 1, d);
+                    }
+                } catch (e) {
+                    // fallback to parsing full string
+                    const parsed = new Date(creationVal);
+                    if (!isNaN(parsed.getTime())) return parsed;
+                }
+            }
+        }
+        return today;
+    })();
+    const effectiveFormatted = formatDateToYYYYMMDD(effectiveDate);
 
     // State to track whether to include partial month
     const [includePartialMonth, setIncludePartialMonth] = useState(
@@ -86,20 +114,20 @@ const InvoicesForm = ({
             membership_id: data?.membership_id || "",
             months: data?.months || 1,
             billDate: data?.billDate
-                ? formatDateToYYYYMMDD(data.billDate)
+                ? String(data.billDate).slice(0, 10)
                 : (() => {
                     const currentYear = today.getFullYear();
                     const currentMonth = today.getMonth();
                     const startYear = currentMonth >= 7 ? currentYear : currentYear - 1;
                     return `${startYear}-08-01`;
                 })(),
-            creationDate: data?.creationDate || todayFormatted,
+            creationDate: data?.creationDate ? String(data.creationDate).slice(0, 10) : todayFormatted,
             totalAmount: data?.totalAmount || 0,
             amountPaid: data?.amountPaid || 0,
             rest: data?.rest || 0,
             student_id: studentId,
             offer_id: data?.offer_id || "",
-            endDate: data?.endDate || "",
+            endDate: data?.endDate ? String(data.endDate).slice(0, 10) : "",
             includePartialMonth: data?.includePartialMonth || false,
             partialMonthAmount: data?.partialMonthAmount || 0,
             last_payment_date: data?.last_payment_date || "",
@@ -235,16 +263,17 @@ const InvoicesForm = ({
 
     const monthsAreConsecutive = areMonthsConsecutive(selectedMonths);
 
-    // Calculate the partial month amount
+    // Calculate the partial month amount. Use effectiveDate so that on update
+    // we count from the invoice creation date instead of the real current date.
     const calculatePartialMonthAmount = () => {
         if (!selectedMembership || !includePartialMonth) return 0;
-        const daysInCurrentMonth = new Date(
-            today.getFullYear(),
-            today.getMonth() + 1,
+        const daysInMonth = new Date(
+            effectiveDate.getFullYear(),
+            effectiveDate.getMonth() + 1,
             0,
         ).getDate();
-        const remainingDays = daysInCurrentMonth - today.getDate();
-        const dailyRate = selectedMembership.price / daysInCurrentMonth;
+        const remainingDays = daysInMonth - effectiveDate.getDate();
+        const dailyRate = selectedMembership.price / daysInMonth;
         return Math.round(dailyRate * remainingDays);
     };
 
@@ -277,9 +306,11 @@ const InvoicesForm = ({
     }, [restAmount, setValue, isTypingAmountPaid]);
 
     // Function to calculate the billing date (date debut) and end date (date fin)
+    // When includePartialMonth is true we start from effectiveDate (invoice creation
+    // date when updating) instead of the real today.
     const calculateBillingDate = () => {
-        // If partial month is included, start from today, else from the first selected month
-        if (includePartialMonth) return todayFormatted;
+        // If partial month is included, start from effective date, else from the first selected month
+        if (includePartialMonth) return effectiveFormatted;
         if (selectedMonths.length > 0) {
             const [year, month] = selectedMonths[0].split("-").map(Number);
             if (!isNaN(year) && !isNaN(month)) {
@@ -309,7 +340,7 @@ const InvoicesForm = ({
             }
         }
         if (includePartialMonth) {
-            const lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+            const lastDay = new Date(effectiveDate.getFullYear(), effectiveDate.getMonth() + 1, 0);
             return formatDateToYYYYMMDD(lastDay);
         }
         // Fallback: End of the first selected month or end of current school year if none selected
@@ -409,8 +440,8 @@ const InvoicesForm = ({
 
     // Calculate formatted dates for display
     const nextMonthLastDay = new Date(
-        today.getFullYear(),
-        today.getMonth() + 1 + 1,
+        effectiveDate.getFullYear(),
+        effectiveDate.getMonth() + 1 + 1,
         0,
     );
     const formattedNextMonthName = nextMonthLastDay.toLocaleDateString(
@@ -470,8 +501,9 @@ const InvoicesForm = ({
         setValue("includePartialMonth", e.target.checked);
     };
 
-    // --- New logic: Block if current month is selected and partial month is checked ---
-    const currentMonthValue = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
+    // --- New logic: Block if the "current" month (based on effectiveDate)
+    // is selected and partial month is checked ---
+    const currentMonthValue = `${effectiveDate.getFullYear()}-${String(effectiveDate.getMonth() + 1).padStart(2, "0")}`;
     const currentMonthSelected = selectedMonths.includes(currentMonthValue);
     const invalidPartialAndCurrentMonth = includePartialMonth && currentMonthSelected;
 
@@ -699,7 +731,7 @@ const InvoicesForm = ({
                                                     htmlFor="includePartialMonth"
                                                     className="text-sm font-medium text-gray-700"
                                                 >
-                                                    Inclure le paiement du mois partiel (aujourd'hui jusqu'à la fin de ce mois)
+                                                    {`Inclure le paiement du mois partiel (${effectiveFormatted === todayFormatted ? "aujourd'hui" : `à partir du ${effectiveDate.toLocaleDateString('fr-FR')}`} jusqu'à la fin de ce mois)`}
                                                 </label>
                                             </div>
                                             {/* Partial Month Amount Display */}
@@ -726,11 +758,8 @@ const InvoicesForm = ({
                                                                 <span className="font-medium">
                                                                     {partialMonthAmount} DH
                                                                 </span>
-                                                                (" "
-                                                                {Math.ceil(
-                                                                    (new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate() - today.getDate())
-                                                                )}{" "}
-                                                                jours restants dans le mois courant)
+                                                                {" "}
+                                                                (<span className="font-medium">{Math.ceil((new Date(effectiveDate.getFullYear(), effectiveDate.getMonth() + 1, 0).getDate() - effectiveDate.getDate()))}</span> jours restants dans le mois courant, calculés à partir du {effectiveDate.toLocaleDateString('fr-FR')})
                                                             </p>
                                                         </div>
                                                     </div>
