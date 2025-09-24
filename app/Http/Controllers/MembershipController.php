@@ -21,11 +21,16 @@ class MembershipController extends Controller
      */
     public function index()
     {
-        $memberships = Membership::withTrashed()->with(['student', 'offer', 'invoices'])->paginate(10);
+        try {
+            $memberships = Membership::withTrashed()->with(['student', 'offer', 'invoices'])->paginate(10);
 
-        return Inertia::render('Menu/SingleStudentPage', [
-            'memberships' => $memberships,
-        ]);
+            return Inertia::render('Menu/SingleStudentPage', [
+                'memberships' => $memberships,
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error listing memberships:', ['error' => $e->getMessage()]);
+            return redirect()->back()->withErrors(['error' => 'An error occurred while loading memberships.']);
+        }
     }
 
     /**
@@ -33,16 +38,21 @@ class MembershipController extends Controller
      */
     public function create()
     {
-        // Fetch necessary data for creating a membership
-        $students = Student::all();
-        $offers = Offer::with('subjects')->get();
-        $teachers = Teacher::all();
+        try {
+            // Fetch necessary data for creating a membership
+            $students = Student::all();
+            $offers = Offer::with('subjects')->get();
+            $teachers = Teacher::all();
 
-        return Inertia::render('Memberships/Create', [
-            'students' => $students,
-            'offers' => $offers,
-            'teachers' => $teachers,
-        ]);
+            return Inertia::render('Memberships/Create', [
+                'students' => $students,
+                'offers' => $offers,
+                'teachers' => $teachers,
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error preparing membership creation:', ['error' => $e->getMessage()]);
+            return redirect()->back()->withErrors(['error' => 'An error occurred while preparing the membership form.']);
+        }
     }
 
     /**
@@ -90,11 +100,16 @@ class MembershipController extends Controller
      */
     public function show($id)
     {
-        $membership = Membership::withTrashed()->with(['student', 'offer', 'invoices'])->findOrFail($id);
+        try {
+            $membership = Membership::withTrashed()->with(['student', 'offer', 'invoices'])->findOrFail($id);
 
-        return Inertia::render('Memberships/Show', [
-            'membership' => $membership,
-        ]);
+            return Inertia::render('Memberships/Show', [
+                'membership' => $membership,
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error showing membership:', ['membership_id' => $id, 'error' => $e->getMessage()]);
+            return redirect()->back()->withErrors(['error' => 'An error occurred while loading the membership.']);
+        }
     }
 
     /**
@@ -102,17 +117,22 @@ class MembershipController extends Controller
      */
     public function edit($id)
     {
-        $membership = Membership::withTrashed()->findOrFail($id);
-        $students = Student::all();
-        $offers = Offer::with('subjects')->get();
-        $teachers = Teacher::all();
+        try {
+            $membership = Membership::withTrashed()->findOrFail($id);
+            $students = Student::all();
+            $offers = Offer::with('subjects')->get();
+            $teachers = Teacher::all();
 
-        return Inertia::render('Memberships/Edit', [
-            'membership' => $membership,
-            'students' => $students,
-            'offers' => $offers,
-            'teachers' => $teachers,
-        ]);
+            return Inertia::render('Memberships/Edit', [
+                'membership' => $membership,
+                'students' => $students,
+                'offers' => $offers,
+                'teachers' => $teachers,
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error preparing membership edit:', ['membership_id' => $id, 'error' => $e->getMessage()]);
+            return redirect()->back()->withErrors(['error' => 'An error occurred while loading the membership for editing.']);
+        }
     }
 
     /**

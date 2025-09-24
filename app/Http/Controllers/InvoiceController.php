@@ -91,6 +91,23 @@ class InvoiceController extends Controller
         DB::beginTransaction();
 
         try {
+            // Normalize membership_id and student_id before validation
+            $incomingMembershipId = $request->input('membership_id', $request->input('membershipId'));
+            if ($incomingMembershipId !== null && $incomingMembershipId !== '') {
+                if (is_string($incomingMembershipId) && is_numeric($incomingMembershipId)) {
+                    $incomingMembershipId = (int) $incomingMembershipId;
+                }
+                $request->merge(['membership_id' => $incomingMembershipId]);
+            }
+
+            // If student_id is missing but membership_id is provided, infer student_id from membership
+            if (!$request->filled('student_id') && $request->filled('membership_id')) {
+                $membershipForStudent = Membership::withTrashed()->find($request->input('membership_id'));
+                if ($membershipForStudent) {
+                    $request->merge(['student_id' => $membershipForStudent->student_id]);
+                }
+            }
+
             // Validate the incoming request
 
 
@@ -147,18 +164,6 @@ class InvoiceController extends Controller
             $membership = Membership::withTrashed()->findOrFail($validated['membership_id']);
             // Always set offer_id from membership
             $validated['offer_id'] = $membership->offer_id;
-            
-            // Additional validation: Ensure offer_id matches membership
-            if (isset($validated['offer_id']) && $validated['offer_id'] != $membership->offer_id) {
-                Log::warning('Offer ID mismatch detected during invoice creation', [
-                    'invoice_offer_id' => $validated['offer_id'],
-                    'membership_offer_id' => $membership->offer_id,
-                    'membership_id' => $membership->id,
-                    'student_id' => $membership->student_id
-                ]);
-                // Force correct offer_id from membership
-                $validated['offer_id'] = $membership->offer_id;
-            }
 
             // Create the invoice
             $invoice = Invoice::create($validated);
@@ -171,7 +176,8 @@ class InvoiceController extends Controller
             $paymentResult = $paymentService->processInvoicePayment($invoice, $validated);
             
             // Validate that payment records were created successfully
-            if (!$paymentResult || !$paymentResult['success']) {
+            if (!$paymentResult || !$paymentResult['success'] || (($paymentResult['created_records'] ?? 0) + ($paymentResult['updated_records'] ?? 0)) === 0) {
+                \Log::error('No payment records created', ['invoice_id' => $invoice->id, 'result' => $paymentResult]);
                 throw new \Exception('Failed to create teacher payment records: ' . implode(', ', $paymentResult['errors'] ?? ['Unknown error']));
             }
             
@@ -384,6 +390,23 @@ class InvoiceController extends Controller
         DB::beginTransaction();
 
         try {
+            // Normalize membership_id and student_id before validation
+            $incomingMembershipId = $request->input('membership_id', $request->input('membershipId'));
+            if ($incomingMembershipId !== null && $incomingMembershipId !== '') {
+                if (is_string($incomingMembershipId) && is_numeric($incomingMembershipId)) {
+                    $incomingMembershipId = (int) $incomingMembershipId;
+                }
+                $request->merge(['membership_id' => $incomingMembershipId]);
+            }
+
+            // If student_id is missing but membership_id is provided, infer student_id from membership
+            if (!$request->filled('student_id') && $request->filled('membership_id')) {
+                $membershipForStudent = Membership::withTrashed()->find($request->input('membership_id'));
+                if ($membershipForStudent) {
+                    $request->merge(['student_id' => $membershipForStudent->student_id]);
+                }
+            }
+
             // Validate the incoming request
             $validated = $request->validate([
                 'membership_id' => 'integer',
@@ -459,15 +482,16 @@ class InvoiceController extends Controller
             $paymentService = new \App\Services\TeacherMembershipPaymentService();
             $paymentResult = $paymentService->processInvoicePayment($invoice, $validated);
             
-            // Validate payment processing
-            if (!$paymentResult || !$paymentResult['success']) {
-                Log::warning('Payment processing had issues', [
+            // Log warning if payment processing has issues but don't fail the update
+            if (!$paymentResult || !$paymentResult['success'] || (($paymentResult['created_records'] ?? 0) + ($paymentResult['updated_records'] ?? 0)) === 0) {
+                Log::error('Failed to process teacher payment records during invoice update', [
                     'invoice_id' => $invoice->id,
                     'errors' => $paymentResult['errors'] ?? ['Unknown error']
                 ]);
+                throw new \Exception('Failed to process teacher payment records during invoice update');
             }
             
-            // Reactivate payment records if invoice is fully paid
+            // If invoice is fully paid, reactivate any inactive payment records
             if ($invoice->amountPaid >= $invoice->totalAmount) {
                 $reactivationResult = $paymentService->reactivatePaymentRecords($invoice);
                 if ($reactivationResult['success'] && $reactivationResult['reactivated_records'] > 0) {
