@@ -411,30 +411,55 @@ public function getAdminEarningsDashboard()
     $currentMonth = now()->month;
     $currentYear = now()->year;
     
-    // Get the actual invoice data directly from the database
+    // Get the actual invoice data with multi-month distribution
     $invoiceData = DB::table('invoices')
-        ->select('id', 'billDate', 'totalAmount', 'amountPaid')
+        ->select('id', 'billDate', 'totalAmount', 'amountPaid', 'selected_months', 'months')
         ->whereNull('deleted_at')
         ->get();
     
-    // Group invoices by month
+    // Group invoices by month with proper distribution
     $monthlyData = [];
     foreach ($invoiceData as $invoice) {
-        $date = Carbon::parse($invoice->billDate);
-        $year = $date->year;
-        $month = $date->month;
+        $selectedMonths = json_decode($invoice->selected_months, true);
         
-        $key = "$year-$month";
-        if (!isset($monthlyData[$key])) {
-            $monthlyData[$key] = [
-                'year' => $year,
-                'month' => $month,
-                'totalRevenue' => 0,
-                'totalExpenses' => 0
-            ];
+        // Handle double-encoded JSON (if selectedMonths is a string, decode it again)
+        if (is_string($selectedMonths)) {
+            $selectedMonths = json_decode($selectedMonths, true);
         }
         
-        $monthlyData[$key]['totalRevenue'] += (float)$invoice->totalAmount;
+        // Ensure selectedMonths is an array
+        if (!is_array($selectedMonths)) {
+            $selectedMonths = [];
+        }
+        
+        if (empty($selectedMonths)) {
+            // Fallback: use billDate month if no selected_months
+            $date = Carbon::parse($invoice->billDate);
+            $selectedMonths = [$date->format('Y-m')];
+        }
+        
+        // Distribute amount across selected months
+        $amountPerMonth = count($selectedMonths) > 0 ? (float)$invoice->amountPaid / count($selectedMonths) : (float)$invoice->amountPaid;
+        
+        foreach ($selectedMonths as $monthYear) {
+            if (empty($monthYear)) continue;
+            
+            $date = Carbon::createFromFormat('Y-m', $monthYear);
+            $year = $date->year;
+            $month = $date->month;
+            
+            $key = "$year-$month";
+            if (!isset($monthlyData[$key])) {
+                $monthlyData[$key] = [
+                    'year' => $year,
+                    'month' => $month,
+                    'totalRevenue' => 0,
+                    'totalExpenses' => 0
+                ];
+            }
+            
+            $monthlyData[$key]['totalRevenue'] += $amountPerMonth;
+        }
     }
     
     // Get monthly expenses
@@ -576,20 +601,66 @@ private function calculateAdminEarningsForComparison()
     // Set start date to the beginning of the earliest year
     $startDate = Carbon::createFromDate($earliestYear, 1, 1);
     
-    // Get all paid amounts from invoices, grouped by month and year
+    // Get all paid amounts from invoices, distributed across selected months
     try {
-        $monthlyEarnings = DB::table('invoices')
-            ->select(
-                DB::raw('YEAR(billDate) as year'),
-                DB::raw('MONTH(billDate) as month'),
-                DB::raw('SUM(CAST(amountPaid AS DECIMAL(10,2))) as totalPaid')
-            )
+        $invoices = DB::table('invoices')
+            ->select('id', 'billDate', 'amountPaid', 'selected_months', 'months')
             ->whereNull('deleted_at')
             ->where('billDate', '>=', $startDate)
-            ->groupBy('year', 'month')
-            ->orderBy('year', 'desc')
-            ->orderBy('month', 'desc')
             ->get();
+        
+        // Distribute payments across selected months
+        $monthlyEarnings = [];
+        foreach ($invoices as $invoice) {
+            $amountPaid = (float)$invoice->amountPaid;
+            $selectedMonths = json_decode($invoice->selected_months, true) ?? [];
+            
+            // Handle double-encoded JSON (if selectedMonths is a string, decode it again)
+            if (is_string($selectedMonths)) {
+                $selectedMonths = json_decode($selectedMonths, true) ?? [];
+            }
+            
+            // Ensure selectedMonths is an array
+            if (!is_array($selectedMonths)) {
+                $selectedMonths = [];
+            }
+            
+            if (empty($selectedMonths)) {
+                // Fallback: use billDate month if no selected_months
+                $billDate = \Carbon\Carbon::parse($invoice->billDate);
+                $selectedMonths = [$billDate->format('Y-m')];
+            }
+            
+            // Distribute amount across selected months
+            $amountPerMonth = count($selectedMonths) > 0 ? $amountPaid / count($selectedMonths) : $amountPaid;
+            
+            foreach ($selectedMonths as $monthYear) {
+                if (empty($monthYear)) continue;
+                
+                $date = \Carbon\Carbon::createFromFormat('Y-m', $monthYear);
+                $year = $date->year;
+                $month = $date->month;
+                $key = $year . '-' . $month;
+                
+                if (!isset($monthlyEarnings[$key])) {
+                    $monthlyEarnings[$key] = [
+                        'year' => $year,
+                        'month' => $month,
+                        'totalPaid' => 0
+                    ];
+                }
+                
+                $monthlyEarnings[$key]['totalPaid'] += $amountPerMonth;
+            }
+        }
+        
+        // Convert to collection and sort
+        $monthlyEarnings = collect(array_values($monthlyEarnings))
+            ->sortByDesc(function ($item) {
+                return ($item['year'] * 100) + $item['month'];
+            })
+            ->values();
+            
     } catch (\Exception $e) {
         $monthlyEarnings = collect([]);
     }
@@ -613,10 +684,10 @@ private function calculateAdminEarningsForComparison()
     
     // Fill in actual earnings data
     foreach ($monthlyEarnings as $earning) {
-        $yearMonth = $earning->year . '-' . sprintf('%02d', $earning->month);
+        $yearMonth = $earning['year'] . '-' . sprintf('%02d', $earning['month']);
         if (isset($allMonths[$yearMonth])) {
             // Make sure to cast to float to avoid string issues
-            $allMonths[$yearMonth]['totalPaid'] = (float)($earning->totalPaid ?? 0);
+            $allMonths[$yearMonth]['totalPaid'] = (float)($earning['totalPaid'] ?? 0);
         }
     }
     

@@ -216,6 +216,8 @@ Route::middleware('auth')->group(function () {
             Route::get('/employee-transactions/{employee}', 'employeeTransactions')->name('employee.transactions');
             Route::get('/employees/{employee}/transactions', 'transactions')->name('employees.transactions');
             Route::get('/admin-earnings-dashboard', 'getAdminEarningsDashboard')->name('admin.earnings.dashboard');
+            Route::get('/filtered-monthly-stats', 'getFilteredMonthlyStats')->name('admin.filtered.monthly.stats');
+            Route::get('/filtered-employee-data', 'getFilteredEmployeeData')->name('admin.filtered.employee.data');
         });
 
         // Payments page

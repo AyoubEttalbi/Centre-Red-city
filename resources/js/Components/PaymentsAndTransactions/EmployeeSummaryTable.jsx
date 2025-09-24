@@ -77,6 +77,10 @@ const EmployeeSummaryTable = ({
     const [viewingEmployeeId, setViewingEmployeeId] = useState(null);
     const [filteredData, setFilteredData] = useState([]);
     const [earningsData, setEarningsData] = useState(null);
+    const [filteredStats, setFilteredStats] = useState(null);
+    const [loadingStats, setLoadingStats] = useState(false);
+    const [filteredEmployeeData, setFilteredEmployeeData] = useState(null);
+    const [loadingEmployeeData, setLoadingEmployeeData] = useState(false);
 
     // New state for filters and sorting
     const [filters, setFilters] = useState({
@@ -119,6 +123,56 @@ const EmployeeSummaryTable = ({
                 });
         }
     }, [adminEarnings, selectedMonth, selectedYear]);
+
+    // Fetch filtered monthly stats when month/year changes
+    useEffect(() => {
+        if (selectedMonth !== null && selectedYear !== null) {
+            setLoadingStats(true);
+            axios
+                .get(route("admin.filtered.monthly.stats"), {
+                    params: {
+                        month: selectedMonth + 1, // Convert from 0-11 to 1-12
+                        year: selectedYear
+                    }
+                })
+                .then((response) => {
+                    if (response.data.success) {
+                        setFilteredStats(response.data);
+                    }
+                })
+                .catch((error) => {
+                    console.error('Error fetching filtered stats:', error);
+                })
+                .finally(() => {
+                    setLoadingStats(false);
+                });
+        }
+    }, [selectedMonth, selectedYear]);
+
+    // Fetch filtered employee data when month/year changes
+    useEffect(() => {
+        if (selectedMonth !== null && selectedYear !== null) {
+            setLoadingEmployeeData(true);
+            axios
+                .get(route("admin.filtered.employee.data"), {
+                    params: {
+                        month: selectedMonth + 1, // Convert from 0-11 to 1-12
+                        year: selectedYear
+                    }
+                })
+                .then((response) => {
+                    if (response.data.success) {
+                        setFilteredEmployeeData(response.data);
+                    }
+                })
+                .catch((error) => {
+                    console.error('Error fetching filtered employee data:', error);
+                })
+                .finally(() => {
+                    setLoadingEmployeeData(false);
+                });
+        }
+    }, [selectedMonth, selectedYear]);
 
     // French months
     const months = [
@@ -195,52 +249,43 @@ const EmployeeSummaryTable = ({
         }
     };
 
-    // Add useEffect to set initial month and year based on most recent payment
+    // Add useEffect to set initial month and year to current month
     useEffect(() => {
         if (!selectedMonth || !selectedYear) {
-            // Find the most recent payment date across all employees
-            let mostRecentDate = null;
-
-            employeePayments.forEach((employee) => {
-                if (employee.transactions && employee.transactions.length > 0) {
-                    const validTransactions = employee.transactions
-                        .filter(
-                            (t) =>
-                                (t.type === "payment" || t.type === "salary") &&
-                                t.updated_at,
-                        )
-                        .map((t) => parseISODate(t.updated_at))
-                        .filter((date) => date !== null);
-
-                    if (validTransactions.length > 0) {
-                        const latestTransaction = new Date(
-                            Math.max(...validTransactions),
-                        );
-                        if (
-                            !mostRecentDate ||
-                            latestTransaction > mostRecentDate
-                        ) {
-                            mostRecentDate = latestTransaction;
-                        }
-                    }
-                }
-            });
-
-            // If we found a recent payment, use its month/year, otherwise use current date
-            const dateToUse = mostRecentDate || new Date();
-            setSelectedMonth(dateToUse.getMonth());
-            setSelectedYear(dateToUse.getFullYear());
-
+            // Always default to current month/year to ensure we show current data
+            const currentDate = new Date();
+            setSelectedMonth(currentDate.getMonth());
+            setSelectedYear(currentDate.getFullYear());
         }
     }, [employeePayments]);
 
-    // Update the filtering useEffect to only run when we have selected month and year
+    // Update the filtering useEffect to use backend data when available
     useEffect(() => {
         if (selectedMonth === null || selectedYear === null) {
             return;
         }
 
-        // First, sort the employees by their last payment date
+        // Use backend filtered data if available, otherwise fall back to frontend filtering
+        if (filteredEmployeeData?.employees) {
+            // Use backend data directly
+            const backendEmployees = filteredEmployeeData.employees.map((employee) => ({
+                ...employee,
+                // Ensure all required fields are present
+                baseSalary: employee.monthlyOwed,
+                monthlyOwed: employee.monthlyOwed,
+                monthlyPaid: employee.monthlyPaid,
+                monthlyExpenses: employee.monthlyExpenses,
+                balance: employee.balance,
+                lastPayment: employee.lastPayment,
+                paymentStatus: employee.paymentStatus,
+                transactions: employee.transactions || []
+            }));
+            
+            setFilteredData(backendEmployees);
+            return;
+        }
+
+        // Fallback to frontend filtering (original logic)
         const sortedEmployees = [...safeEmployeePayments].sort((a, b) => {
             const lastPaymentA = getLastPaymentDate(a);
             const lastPaymentB = getLastPaymentDate(b);
@@ -304,7 +349,7 @@ const EmployeeSummaryTable = ({
         });
 
         setFilteredData(filtered);
-    }, [selectedMonth, selectedYear, safeEmployeePayments]);
+    }, [selectedMonth, selectedYear, safeEmployeePayments, filteredEmployeeData]);
 
     const handleViewHistory = (employeeId) => {
         const employee = safeEmployeePayments.find(
@@ -321,19 +366,7 @@ const EmployeeSummaryTable = ({
         }
     };
 
-    // Calculate the total amounts properly (as numbers)
-    const totalMonthlySalaries = filteredData.reduce(
-        (total, emp) => total + (Number(emp.monthlyOwed) || 0),
-        0,
-    );
-    const totalMonthlyPayments = filteredData.reduce(
-        (total, emp) => total + (Number(emp.monthlyPaid) || 0),
-        0,
-    );
-    const totalMonthlyExpenses = filteredData.reduce(
-        (total, emp) => total + (Number(emp.monthlyExpenses) || 0),
-        0,
-    );
+    // Note: Monthly totals are now calculated by backend API for better accuracy
 
     // Find the matching earnings entry for the selected month and year from the new API structure
     // Since backend API returns month as 1-12 but our dropdown is 0-11, we add 1 to selectedMonth
@@ -342,6 +375,7 @@ const EmployeeSummaryTable = ({
             earnings.month === selectedMonth + 1 &&
             earnings.year === parseInt(selectedYear),
     );
+
 
     // Debug: Check if any earnings match the current month/year
     if (earningsData?.earnings) {
@@ -352,21 +386,32 @@ const EmployeeSummaryTable = ({
         );
     }
 
-    // Get the total revenue for the selected month from the new API structure
-    const totalMonthlyRevenue = currentMonthEarnings
-        ? Number(currentMonthEarnings.totalRevenue)
-        : 0;
-    const apiTotalMonthlyExpenses = currentMonthEarnings
-        ? Number(currentMonthEarnings.totalExpenses)
-        : 0;
-
-    // Calculate totalMonthlyBalance based on the new API structure
-    // If we have matching data, use the profit from the API, otherwise calculate from filtered data
-    const totalMonthlyBalance = currentMonthEarnings
-        ? Number(currentMonthEarnings.profit)
-        : Number(totalMonthlyRevenue) -
-          totalMonthlyPayments -
-          apiTotalMonthlyExpenses;
+    // Get the total revenue from filtered backend stats
+    let totalMonthlyRevenue = 0;
+    if (filteredStats?.stats) {
+        totalMonthlyRevenue = Number(filteredStats.stats.totalRevenue);
+    } else if (earningsData?.includePartialMonth && (!earningsData?.earnings || earningsData.earnings.length === 0)) {
+        // Fallback to old logic if filtered stats not available
+        const currentDate = new Date();
+        const currentMonth = currentDate.getMonth(); // 0-11
+        const currentYear = currentDate.getFullYear();
+        
+        if (selectedMonth === currentMonth && selectedYear === currentYear) {
+            totalMonthlyRevenue = 0;
+        } else {
+            totalMonthlyRevenue = 0;
+        }
+    } else {
+        // Fallback to old logic
+        totalMonthlyRevenue = currentMonthEarnings
+            ? Number(currentMonthEarnings.totalRevenue)
+            : 0;
+    }
+    // Get other stats from filtered backend data
+    const backendTotalSalaries = filteredStats?.stats ? Number(filteredStats.stats.totalSalaries) : 0;
+    const backendTotalPayments = filteredStats?.stats ? Number(filteredStats.stats.totalPayments) : 0;
+    const backendTotalExpenses = filteredStats?.stats ? Number(filteredStats.stats.totalExpenses) : 0;
+    const backendTotalProfit = filteredStats?.stats ? Number(filteredStats.stats.profit) : 0;
 
     // Get unique schools from employee data
     const schools = [
@@ -637,6 +682,9 @@ const EmployeeSummaryTable = ({
                                     >
                                         <div className="flex items-center">
                                             Employé
+                                            {loadingEmployeeData && (
+                                                <span className="ml-2 text-xs text-blue-600">Chargement...</span>
+                                            )}
                                             <SortIcon column="userName" />
                                         </div>
                                     </th>
@@ -867,97 +915,83 @@ const EmployeeSummaryTable = ({
                 </div>
             </div>
             {/* Pagination */}
-            {totalPages > 1 && (
-                <div className="flex items-center justify-between px-4 py-3 bg-white border-t border-gray-200 sm:px-6 rounded-lg shadow">
-                    <div className="flex justify-between sm:hidden">
-                        <button
-                            onClick={() =>
-                                setCurrentPage((prev) => Math.max(prev - 1, 1))
-                            }
-                            disabled={currentPage === 1}
-                            className="relative inline-flex items-center px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                            Précédent
-                        </button>
-                        <button
-                            onClick={() =>
-                                setCurrentPage((prev) =>
-                                    Math.min(prev + 1, totalPages),
-                                )
-                            }
-                            disabled={currentPage === totalPages}
-                            className="relative ml-3 inline-flex items-center px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                            Suivant
-                        </button>
-                    </div>
-                    <div className="hidden sm:flex sm:items-center sm:justify-between">
-                        <div>
-                            <p className="text-sm text-gray-700">
-                                Affichage de
-                                <span className="font-medium">
-                                    {indexOfFirstItem + 1}
-                                </span>
-                                à
-                                <span className="font-medium">
-                                    {Math.min(indexOfLastItem, filteredData.length)}
-                                </span>
-                                sur
-                                <span className="font-medium">
-                                    {filteredData.length}
-                                </span>
-                                résultats
-                            </p>
-                        </div>
-                        <div>
-                            <nav
-                                className="relative z-0 inline-flex rounded-md shadow-sm -space-x-px"
-                                aria-label="Pagination"
-                            >
-                                <button
-                                    onClick={() =>
-                                        setCurrentPage((prev) =>
-                                            Math.max(prev - 1, 1),
-                                        )
-                                    }
-                                    disabled={currentPage === 1}
-                                    className="relative inline-flex items-center px-2 py-2 rounded-l-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                                >
-                                    Précédent
-                                </button>
-                                {[...Array(totalPages)].map((_, i) => (
-                                    <button
-                                        key={i + 1}
-                                        onClick={() => setCurrentPage(i + 1)}
-                                        className={`relative inline-flex items-center px-4 py-2 border text-sm font-medium ${
-                                            currentPage === i + 1
-                                                ? "z-10 bg-indigo-50 border-indigo-500 text-indigo-600"
-                                                : "bg-white border-gray-300 text-gray-500 hover:bg-gray-50"
-                                        }`}
-                                    >
-                                        {i + 1}
-                                    </button>
-                                ))}
-                                <button
-                                    onClick={() =>
-                                        setCurrentPage((prev) =>
-                                            Math.min(prev + 1, totalPages),
-                                        )
-                                    }
-                                    disabled={currentPage === totalPages}
-                                    className="relative inline-flex items-center px-2 py-2 rounded-r-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                                >
-                                    Suivant
-                                </button>
-                            </nav>
-                        </div>
-                    </div>
+            {/* Pagination Controls */}
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mt-6">
+                <div className="mb-2 sm:mb-0">
+                    <p className="text-sm text-gray-700">
+                        Affichage de
+                        <span className="font-medium mx-1">{indexOfFirstItem + 1}</span>
+                        à
+                        <span className="font-medium mx-1">{Math.min(indexOfLastItem, filteredData.length)}</span>
+                        sur
+                        <span className="font-medium mx-1">{filteredData.length}</span>
+                        résultats
+                    </p>
                 </div>
-            )}
+                <nav className="flex items-center space-x-1" aria-label="Pagination">
+                    {totalPages > 5 && (
+                        <button
+                            onClick={() => setCurrentPage(1)}
+                            disabled={currentPage === 1}
+                            className="px-3 py-2 rounded-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-100 disabled:opacity-50"
+                        >
+                            Premier
+                        </button>
+                    )}
+                    <button
+                        onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+                        disabled={currentPage === 1}
+                        className="px-3 py-2 rounded-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-100 disabled:opacity-50"
+                    >
+                        Précédent
+                    </button>
+                    {Array.from({ length: totalPages }, (_, i) => i + 1)
+                        .filter((page) => {
+                            if (totalPages <= 5) return true;
+                            if (currentPage <= 3) return page <= 5;
+                            if (currentPage >= totalPages - 2) return page > totalPages - 5;
+                            return Math.abs(page - currentPage) <= 2;
+                        })
+                        .map((page) => (
+                            <button
+                                key={page}
+                                onClick={() => setCurrentPage(page)}
+                                className={`px-3 py-2 rounded-md border border-gray-300 text-sm font-medium mx-0.5 ${
+                                    page === currentPage
+                                        ? 'bg-indigo-600 text-white border-indigo-600'
+                                        : 'bg-white text-gray-700 hover:bg-gray-100'
+                                }`}
+                            >
+                                {page}
+                            </button>
+                        ))}
+                    <button
+                        onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
+                        disabled={currentPage === totalPages}
+                        className="px-3 py-2 rounded-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-100 disabled:opacity-50"
+                    >
+                        Suivant
+                    </button>
+                    {totalPages > 5 && (
+                        <button
+                            onClick={() => setCurrentPage(totalPages)}
+                            disabled={currentPage === totalPages}
+                            className="px-3 py-2 rounded-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-100 disabled:opacity-50"
+                        >
+                            Dernier
+                        </button>
+                    )}
+                </nav>
+            </div>
             {/* Résumé mensuel */}
             <div className="bg-white shadow rounded-lg p-6">
                 <h3 className="text-lg font-medium text-gray-900 mb-4">
-                    Résumé mensuel - {months.find((m) => m.value === selectedMonth)?.label} {selectedYear}
+                    Résumé mensuel - {filteredStats?.monthName || months.find((m) => m.value === selectedMonth)?.label} {selectedYear}
+                    {loadingStats && (
+                        <span className="ml-2 text-sm text-gray-600 bg-gray-100 px-2 py-1 rounded-full">
+                            Chargement...
+                        </span>
+                    )}
                 </h3>
                 <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
                     <div className="bg-purple-50 rounded-lg p-4">
@@ -965,10 +999,13 @@ const EmployeeSummaryTable = ({
                             Revenu mensuel total
                         </p>
                         <p className="text-2xl font-bold text-purple-900">
-                            {formatCurrency(totalMonthlyRevenue)}
+                            {loadingStats ? "..." : formatCurrency(totalMonthlyRevenue)}
                         </p>
                         <p className="text-xs text-purple-500 mt-1">
-                            Factures et inscriptions
+                            {filteredStats?.details?.revenue ? 
+                                `${filteredStats.details.revenue.invoiceCount} factures` : 
+                                "Factures et inscriptions"
+                            }
                         </p>
                     </div>
                     <div className="bg-blue-50 rounded-lg p-4">
@@ -976,10 +1013,13 @@ const EmployeeSummaryTable = ({
                             Total salaires mensuels
                         </p>
                         <p className="text-2xl font-bold text-blue-900">
-                            {formatCurrency(totalMonthlySalaries)}
+                            {loadingStats ? "..." : formatCurrency(backendTotalSalaries)}
                         </p>
                         <p className="text-xs text-blue-500 mt-1">
-                            Montants fixes mensuels
+                            {filteredStats?.details?.salaries ? 
+                                `${filteredStats.details.salaries.salaryCount} salaires` : 
+                                "Montants fixes mensuels"
+                            }
                         </p>
                     </div>
                     <div className="bg-green-50 rounded-lg p-4">
@@ -987,10 +1027,13 @@ const EmployeeSummaryTable = ({
                             Total paiements mensuels
                         </p>
                         <p className="text-2xl font-bold text-green-900">
-                            {formatCurrency(totalMonthlyPayments)}
+                            {loadingStats ? "..." : formatCurrency(backendTotalPayments)}
                         </p>
                         <p className="text-xs text-green-500 mt-1">
-                            Paiements effectués
+                            {filteredStats?.details?.payments ? 
+                                `${filteredStats.details.payments.paymentCount} paiements` : 
+                                "Paiements effectués"
+                            }
                         </p>
                     </div>
                     <div className="bg-orange-50 rounded-lg p-4">
@@ -998,29 +1041,32 @@ const EmployeeSummaryTable = ({
                             Total dépenses mensuelles
                         </p>
                         <p className="text-2xl font-bold text-orange-900">
-                            {formatCurrency(totalMonthlyExpenses)}
+                            {loadingStats ? "..." : formatCurrency(backendTotalExpenses)}
                         </p>
                         <p className="text-xs text-orange-500 mt-1">
-                            Toutes les dépenses enregistrées
+                            {filteredStats?.details?.expenses ? 
+                                `${filteredStats.details.expenses.expenseCount} dépenses` : 
+                                "Toutes les dépenses enregistrées"
+                            }
                         </p>
                     </div>
                     <div
-                        className={`${totalMonthlyBalance >= 0 ? "bg-green-50" : "bg-red-50"} rounded-lg p-4`}
+                        className={`${backendTotalProfit >= 0 ? "bg-green-50" : "bg-red-50"} rounded-lg p-4`}
                     >
                         <p
-                            className={`text-sm ${totalMonthlyBalance >= 0 ? "text-green-700" : "text-red-700"}`}
+                            className={`text-sm ${backendTotalProfit >= 0 ? "text-green-700" : "text-red-700"}`}
                         >
                             Bénéfice mensuel
                         </p>
                         <p
-                            className={`text-2xl font-bold ${totalMonthlyBalance >= 0 ? "text-green-900" : "text-red-900"}`}
+                            className={`text-2xl font-bold ${backendTotalProfit >= 0 ? "text-green-900" : "text-red-900"}`}
                         >
-                            {formatCurrency(totalMonthlyBalance)}
+                            {loadingStats ? "..." : formatCurrency(backendTotalProfit)}
                         </p>
                         <p
-                            className={`text-xs ${totalMonthlyBalance >= 0 ? "text-green-500" : "text-red-500"} mt-1`}
+                            className={`text-xs ${backendTotalProfit >= 0 ? "text-green-500" : "text-red-500"} mt-1`}
                         >
-                            {totalMonthlyBalance >= 0
+                            {backendTotalProfit >= 0
                                 ? "Bénéfice net"
                                 : "Perte nette"}
                         </p>

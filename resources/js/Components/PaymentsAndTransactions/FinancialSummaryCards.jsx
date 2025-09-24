@@ -9,6 +9,7 @@ const FinancialSummaryCards = ({
     expensesChange,
     profitChange,
     yearlyTotalRevenue,
+    isPartialMonthMode = false,
 }) => {
     return (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
@@ -57,7 +58,12 @@ const FinancialSummaryCards = ({
                         </span>
                     )}
                 </div>
-                <p className="text-xs text-blue-700">Depuis les paiements de factures</p>
+                <p className="text-xs text-blue-700">
+                    {isPartialMonthMode 
+                        ? "Mois en cours - Aucune donnée disponible"
+                        : "Depuis les paiements de factures"
+                    }
+                </p>
             </div>
 
             <div className="bg-gradient-to-br from-red-50 to-orange-50 rounded-xl p-5 shadow-sm border border-red-100">
@@ -106,7 +112,10 @@ const FinancialSummaryCards = ({
                     )}
                 </div>
                 <p className="text-xs text-red-700">
-                    Salaires, opérations et paiements des instructeurs
+                    {isPartialMonthMode 
+                        ? "Mois en cours - Aucune donnée disponible"
+                        : "Salaires, opérations et paiements des instructeurs"
+                    }
                 </p>
             </div>
 
@@ -156,7 +165,10 @@ const FinancialSummaryCards = ({
                     )}
                 </div>
                 <p className="text-xs text-green-700">
-                    Gains nets après toutes dépenses
+                    {isPartialMonthMode 
+                        ? "Mois en cours - Aucune donnée disponible"
+                        : "Gains nets après toutes dépenses"
+                    }
                 </p>
             </div>
         </div>

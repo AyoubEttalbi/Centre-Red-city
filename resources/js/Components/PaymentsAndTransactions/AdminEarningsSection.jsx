@@ -18,6 +18,10 @@ const AdminEarningsSection = ({ adminEarnings }) => {
             ? adminEarnings.yearlyMonthlyTotals
             : {};
     const debugInfo = adminEarnings?.debug || {};
+    
+    // Check if we're in includePartialMonth mode (no earnings data)
+    const isPartialMonthMode = adminEarnings?.includePartialMonth && 
+        (!earningsData || earningsData.length === 0);
 
     const [viewMode, setViewMode] = useState("monthly");
     const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
@@ -130,15 +134,16 @@ const AdminEarningsSection = ({ adminEarnings }) => {
 
         const yearlyData = Object.values(quarterData);
 
-        const totalRevenue = filteredEarnings.reduce(
+        // Calculate totals - if in partial month mode, show 0 for current month
+        const totalRevenue = isPartialMonthMode ? 0 : filteredEarnings.reduce(
             (sum, item) => sum + Number(item.totalRevenue || 0),
             0,
         );
-        const totalExpenses = filteredEarnings.reduce(
+        const totalExpenses = isPartialMonthMode ? 0 : filteredEarnings.reduce(
             (sum, item) => sum + Number(item.totalExpenses || 0),
             0,
         );
-        const totalProfit = filteredEarnings.reduce(
+        const totalProfit = isPartialMonthMode ? 0 : filteredEarnings.reduce(
             (sum, item) => sum + Number(item.profit || 0),
             0,
         );
@@ -195,6 +200,7 @@ const AdminEarningsSection = ({ adminEarnings }) => {
                 expensesChange={expensesChange}
                 profitChange={profitChange}
                 yearlyTotalRevenue={yearlyTotalRevenue}
+                isPartialMonthMode={isPartialMonthMode}
             />
 
             <EarningsChart
