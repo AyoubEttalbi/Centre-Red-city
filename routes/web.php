@@ -218,6 +218,8 @@ Route::middleware('auth')->group(function () {
             Route::get('/admin-earnings-dashboard', 'getAdminEarningsDashboard')->name('admin.earnings.dashboard');
             Route::get('/filtered-monthly-stats', 'getFilteredMonthlyStats')->name('admin.filtered.monthly.stats');
             Route::get('/filtered-employee-data', 'getFilteredEmployeeData')->name('admin.filtered.employee.data');
+            // Debug monthly revenue breakdown
+            Route::get('/debug-monthly-revenue', 'debugMonthlyRevenue')->name('admin.debug.monthly.revenue');
         });
 
         // Payments page

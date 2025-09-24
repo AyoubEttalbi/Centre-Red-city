@@ -2355,4 +2355,197 @@ public function processMonthRecurringTransactions(Request $request)
             ]
         ]);
     }
+
+    /**
+     * API: Filtered monthly stats for given month/year
+     * Expected by route name 'admin.filtered.monthly.stats'.
+     * Keep response shape compatible with frontend; return success=false so UI can fallback.
+     */
+    public function getFilteredMonthlyStats(Request $request)
+    {
+        try {
+            $month = (int) $request->query('month'); // 1-12
+            $year = (int) $request->query('year');
+
+            if ($month < 1 || $month > 12 || $year < 2000) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Invalid month or year'
+                ], 200);
+            }
+
+            $targetMonthKey = sprintf('%04d-%02d', $year, $month);
+
+            // Revenue from invoices distributed across selected_months
+            $invoices = DB::table('invoices')
+                ->select('id', 'billDate', 'amountPaid', 'selected_months')
+                ->whereNull('deleted_at')
+                ->get();
+
+            $totalRevenue = 0.0;
+            $invoiceCountForMonth = 0;
+
+            foreach ($invoices as $invoice) {
+                $selectedMonths = json_decode($invoice->selected_months, true);
+                if (is_string($selectedMonths)) {
+                    $selectedMonths = json_decode($selectedMonths, true);
+                }
+                if (!is_array($selectedMonths) || empty($selectedMonths)) {
+                    // Fallback: use billDate month
+                    if (!empty($invoice->billDate)) {
+                        $date = Carbon::parse($invoice->billDate);
+                        $selectedMonths = [$date->format('Y-m')];
+                    } else {
+                        $selectedMonths = [];
+                    }
+                }
+
+                if (in_array($targetMonthKey, $selectedMonths, true)) {
+                    $monthsCount = max(count($selectedMonths), 1);
+                    $amountPerMonth = (float)$invoice->amountPaid / $monthsCount;
+                    $totalRevenue += $amountPerMonth;
+                    $invoiceCountForMonth += 1;
+                }
+            }
+
+            // Expenses split into salaries, payments, expenses for the month
+            $baseQuery = DB::table('transactions')
+                ->whereYear('payment_date', $year)
+                ->whereMonth('payment_date', $month);
+
+            $totalSalaries = (float) (clone $baseQuery)->where('type', 'salary')->sum(DB::raw('CAST(amount AS DECIMAL(10,2))'));
+            $totalPayments = (float) (clone $baseQuery)->where('type', 'payment')->sum(DB::raw('CAST(amount AS DECIMAL(10,2))'));
+            $totalExpenses = (float) (clone $baseQuery)->where('type', 'expense')->sum(DB::raw('CAST(amount AS DECIMAL(10,2))'));
+
+            // Counts
+            $salaryCount = (clone $baseQuery)->where('type', 'salary')->count();
+            $paymentCount = (clone $baseQuery)->where('type', 'payment')->count();
+            $expenseCount = (clone $baseQuery)->where('type', 'expense')->count();
+
+            $totalOutflow = $totalSalaries + $totalPayments + $totalExpenses;
+            $profit = $totalRevenue - $totalOutflow;
+
+            return response()->json([
+                'success' => true,
+                'month' => $month,
+                'year' => $year,
+                'monthName' => $this->formatMonthInFrench($month),
+                'stats' => [
+                    'totalRevenue' => round($totalRevenue, 2),
+                    'totalSalaries' => round($totalSalaries, 2),
+                    'totalPayments' => round($totalPayments, 2),
+                    'totalExpenses' => round($totalExpenses, 2),
+                    'profit' => round($profit, 2),
+                ],
+                'details' => [
+                    'revenue' => [ 'invoiceCount' => $invoiceCountForMonth ],
+                    'salaries' => [ 'salaryCount' => $salaryCount ],
+                    'payments' => [ 'paymentCount' => $paymentCount ],
+                    'expenses' => [ 'expenseCount' => $expenseCount ],
+                ],
+            ], 200);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error generating filtered monthly stats',
+            ], 200);
+        }
+    }
+
+    /**
+     * API: Filtered employee data for given month/year
+     * Expected by route name 'admin.filtered.employee.data'.
+     * Return success=false to allow frontend to use its fallback filtering.
+     */
+    public function getFilteredEmployeeData(Request $request)
+    {
+        try {
+            $month = (int) $request->query('month'); // 1-12
+            $year = (int) $request->query('year');
+
+            if ($month < 1 || $month > 12 || $year < 2000) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Invalid month or year'
+                ], 200);
+            }
+
+            // Do not send an empty employees array to avoid overriding frontend fallback
+            return response()->json([
+                'success' => false,
+                'message' => 'Filtered employee data not implemented yet',
+                'month' => $month,
+                'year' => $year,
+            ], 200);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error generating filtered employee data',
+            ], 200);
+        }
+    }
+
+    /**
+     * DEBUG: Detailed monthly revenue breakdown by invoice for verification
+     * Route: GET /debug-monthly-revenue?month=9&year=2025
+     */
+    public function debugMonthlyRevenue(Request $request)
+    {
+        $month = (int) $request->query('month'); // 1-12
+        $year = (int) $request->query('year');
+        if ($month < 1 || $month > 12 || $year < 2000) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Provide valid month (1-12) and year'
+            ], 200);
+        }
+
+        $targetMonthKey = sprintf('%04d-%02d', $year, $month);
+
+        $invoices = DB::table('invoices')
+            ->select('id', 'billDate', 'amountPaid', 'selected_months')
+            ->whereNull('deleted_at')
+            ->get();
+
+        $items = [];
+        $totalRevenue = 0.0;
+        foreach ($invoices as $invoice) {
+            $selectedMonths = json_decode($invoice->selected_months, true);
+            if (is_string($selectedMonths)) {
+                $selectedMonths = json_decode($selectedMonths, true);
+            }
+            if (!is_array($selectedMonths) || empty($selectedMonths)) {
+                if (!empty($invoice->billDate)) {
+                    $date = Carbon::parse($invoice->billDate);
+                    $selectedMonths = [$date->format('Y-m')];
+                } else {
+                    $selectedMonths = [];
+                }
+            }
+
+            $monthsCount = max(count($selectedMonths), 1);
+            if (in_array($targetMonthKey, $selectedMonths, true)) {
+                $amountPerMonth = (float)$invoice->amountPaid / $monthsCount;
+                $items[] = [
+                    'invoiceId' => $invoice->id,
+                    'billDate' => $invoice->billDate,
+                    'amountPaid' => (float)$invoice->amountPaid,
+                    'monthsCount' => $monthsCount,
+                    'selectedMonths' => $selectedMonths,
+                    'allocatedToTargetMonth' => round($amountPerMonth, 2),
+                ];
+                $totalRevenue += $amountPerMonth;
+            }
+        }
+
+        return response()->json([
+            'success' => true,
+            'month' => $month,
+            'year' => $year,
+            'monthName' => $this->formatMonthInFrench($month),
+            'invoiceCount' => count($items),
+            'totalRevenue' => round($totalRevenue, 2),
+            'items' => $items,
+        ]);
+    }
 }

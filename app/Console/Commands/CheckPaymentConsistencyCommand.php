@@ -108,3 +108,5 @@ class CheckPaymentConsistencyCommand extends Command
         return 0;
     }
 }
+
+
