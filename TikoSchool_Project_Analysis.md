@@ -242,3 +242,33 @@ The project is built on a solid and modern technology stack. The architecture is
         - `app/Http/Controllers/MembershipController.php` - Fixed validation in update method (lines 130-137)
         - `app/Http/Controllers/TeacherController.php` - Added fallback logic (lines 494-495, 778-779)
         - `app/Http/Controllers/TransactionController.php` - Added fallback logic (lines 2081, 2215)
+
+*   **Partial Month Invoice Display & Revenue Calculation Logic:**
+    *   **Issue Identified:** Complex discrepancy between teacher earnings display and monthly revenue calculations when handling partial month invoices.
+    *   **Problem:** The system had inconsistent logic for handling invoices with `includePartialMonth = 1` and `partialMonthAmount > 0`, causing:
+        - Teacher earnings to show different amounts across different components (TeacherInvoicesTable vs TeacherEarningsTable)
+        - Monthly revenue calculations to be inconsistent between old and new calculation methods
+        - Partial month invoices not appearing in current month filters when they should
+    *   **Root Cause Analysis:** 
+        - Multiple controllers (`TeacherController`, `TransactionController`) had different approaches to handling partial month invoices
+        - The `selected_months` field was not being properly updated to include the `billMonth` for partial month invoices
+        - Revenue calculation methods were using different logic (partial month amount vs full amount distribution)
+    *   **Technical Solution Implemented:**
+        - **Hybrid Approach:** Added logic to include `billMonth` in `selectedMonths` for partial month invoices while maintaining the original revenue calculation method
+        - **Consistent Partial Month Handling:** All controllers now properly add the current month to `selectedMonths` when `includePartialMonth = 1`
+        - **Revenue Calculation Preservation:** Kept the original `amountPaid / monthsCount` calculation method to maintain expected revenue totals
+        - **Cross-Component Consistency:** Ensured TeacherInvoicesTable, TeacherEarningsTable, and TeacherEarningsDetailModal all use the same logic
+    *   **Business Logic:** 
+        - When a student pays for a partial month (e.g., September 2025) with `includePartialMonth = 1` and `partialMonthAmount = 30.00`
+        - The invoice should appear in September 2025 filter even if `selected_months = ["2025-10"]`
+        - The revenue calculation should use the original method to maintain consistency with existing financial reports
+        - Teacher earnings should be calculated consistently across all components
+    *   **Code Locations:** 
+        - `app/Http/Controllers/TeacherController.php` - Added `billMonth` inclusion logic (lines 513-518)
+        - `app/Http/Controllers/TransactionController.php` - Updated `teacherMonthlyEarningsReport`, `teacherInvoiceBreakdown`, and `getFilteredMonthlyStats` methods
+        - `app/Http/Controllers/TransactionController.php` - Added partial month handling in `getFilteredMonthlyStats` (lines 2482-2495)
+    *   **Impact:** 
+        - Partial month invoices now correctly appear in current month filters
+        - Monthly revenue calculations maintain consistency with existing business logic
+        - Teacher earnings display is consistent across all components
+        - Financial reporting accuracy is preserved while improving user experience

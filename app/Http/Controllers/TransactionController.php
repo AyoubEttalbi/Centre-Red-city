@@ -604,7 +604,7 @@ private function calculateAdminEarningsForComparison()
     // Get all paid amounts from invoices, distributed across selected months
     try {
         $invoices = DB::table('invoices')
-            ->select('id', 'billDate', 'amountPaid', 'selected_months', 'months', 'includePartialMonth', 'partialMonthAmount')
+            ->select('id', 'billDate', 'amountPaid', 'selected_months', 'months')
             ->whereNull('deleted_at')
             ->where('billDate', '>=', $startDate)
             ->get();
@@ -631,50 +631,9 @@ private function calculateAdminEarningsForComparison()
                 $selectedMonths = [$billDate->format('Y-m')];
             }
             
-            // Handle partial month invoices - add billMonth to selectedMonths if needed
-            $includePartialMonth = $invoice->includePartialMonth ?? false;
-            $partialMonthAmount = $invoice->partialMonthAmount ?? 0;
-            $billMonth = null;
-            
-            if (!empty($invoice->billDate)) {
-                $billMonth = \Carbon\Carbon::parse($invoice->billDate)->format('Y-m');
-            }
-            
-            if ($includePartialMonth && $partialMonthAmount > 0 && $billMonth) {
-                if (!in_array($billMonth, $selectedMonths)) {
-                    $selectedMonths[] = $billMonth;
-                }
-            }
-            
-            // Calculate amounts for each month
-            $teacherAmountForPartial = 0;
-            $fullMonthsAmount = 0;
-            $countFullMonths = 0;
-
-            if ($includePartialMonth && $partialMonthAmount > 0) {
-                $teacherAmountForPartial = (float)$partialMonthAmount;
-
-                // Count full months (exclude billMonth if it was inserted for partial)
-                $countFullMonths = count(array_filter($selectedMonths, function($m) use ($billMonth) {
-                    return $m !== $billMonth;
-                }));
-
-                $remainingAmount = $amountPaid - $teacherAmountForPartial;
-                if ($remainingAmount < 0) {
-                    // Safety: if numbers are inconsistent, fallback to equal split across months
-                    $remainingAmount = max(0, $amountPaid);
-                }
-
-                if ($countFullMonths > 0) {
-                    $fullMonthsAmount = $remainingAmount / $countFullMonths;
-                } else {
-                    $fullMonthsAmount = 0;
-                }
-            } else {
-                // No partial month: split total across all selected months
-                $countFullMonths = count($selectedMonths);
-                $fullMonthsAmount = $countFullMonths > 0 ? ($amountPaid / $countFullMonths) : 0;
-            }
+            // Distribute amount across selected months
+            $monthsCount = max(count($selectedMonths), 1);
+            $amountPerMonth = $amountPaid / $monthsCount;
             
             foreach ($selectedMonths as $monthYear) {
                 if (empty($monthYear)) continue;
@@ -692,9 +651,7 @@ private function calculateAdminEarningsForComparison()
                     ];
                 }
                 
-                // Calculate the correct amount for this month
-                $amountForThisMonth = ($includePartialMonth && $partialMonthAmount > 0 && $monthYear === $billMonth) ? $teacherAmountForPartial : $fullMonthsAmount;
-                $monthlyEarnings[$key]['totalPaid'] += $amountForThisMonth;
+                $monthlyEarnings[$key]['totalPaid'] += $amountPerMonth;
             }
         }
         
@@ -2533,22 +2490,14 @@ public function processMonthRecurringTransactions(Request $request)
                 
                 if ($includePartialMonth && $partialMonthAmount > 0 && $billMonth) {
                     if (!in_array($billMonth, $selectedMonths)) {
-                        $selectedMonths[] = $billMonth;
+                        array_unshift($selectedMonths, $billMonth);
                     }
                 }
 
                 if (in_array($targetMonthKey, $selectedMonths, true)) {
-                    // Calculate the correct amount for this month
-                    if ($includePartialMonth && $partialMonthAmount > 0 && $targetMonthKey === $billMonth) {
-                        // This is the partial month - use partialMonthAmount
-                        $amountForThisMonth = (float)$partialMonthAmount;
-                    } else {
-                        // This is a full month - split the remaining amount
-                        $monthsCount = max(count($selectedMonths), 1);
-                        $amountForThisMonth = (float)$invoice->amountPaid / $monthsCount;
-                    }
-                    
-                    $totalRevenue += $amountForThisMonth;
+                    $monthsCount = max(count($selectedMonths), 1);
+                    $amountPerMonth = (float)$invoice->amountPaid / $monthsCount;
+                    $totalRevenue += $amountPerMonth;
                     $invoiceCountForMonth += 1;
                 }
             }
@@ -2668,40 +2617,18 @@ public function processMonthRecurringTransactions(Request $request)
                 }
             }
 
-            // Handle partial month invoices
-            $includePartialMonth = $invoice->includePartialMonth ?? false;
-            $partialMonthAmount = $invoice->partialMonthAmount ?? 0;
-            $billMonth = $invoice->billDate ? Carbon::parse($invoice->billDate)->format('Y-m') : null;
-            
-            // If this invoice includes a partial month payment, ensure the bill month is present
-            if ($includePartialMonth && $partialMonthAmount > 0 && $billMonth) {
-                if (!in_array($billMonth, $selectedMonths)) {
-                    array_unshift($selectedMonths, $billMonth);
-                }
-            }
-
+            $monthsCount = max(count($selectedMonths), 1);
             if (in_array($targetMonthKey, $selectedMonths, true)) {
-                // Calculate the correct amount for this month
-                if ($includePartialMonth && $partialMonthAmount > 0 && $targetMonthKey === $billMonth) {
-                    // This is the partial month - use partialMonthAmount
-                    $amountForThisMonth = (float)$partialMonthAmount;
-                } else {
-                    // This is a full month - split the remaining amount
-                    $monthsCount = max(count($selectedMonths), 1);
-                    $amountForThisMonth = (float)$invoice->amountPaid / $monthsCount;
-                }
-                
+                $amountPerMonth = (float)$invoice->amountPaid / $monthsCount;
                 $items[] = [
                     'invoiceId' => $invoice->id,
                     'billDate' => $invoice->billDate,
                     'amountPaid' => (float)$invoice->amountPaid,
-                    'monthsCount' => count($selectedMonths),
+                    'monthsCount' => $monthsCount,
                     'selectedMonths' => $selectedMonths,
-                    'allocatedToTargetMonth' => round($amountForThisMonth, 2),
-                    'isPartialMonth' => $includePartialMonth && $targetMonthKey === $billMonth,
-                    'partialMonthAmount' => $partialMonthAmount
+                    'allocatedToTargetMonth' => round($amountPerMonth, 2),
                 ];
-                $totalRevenue += $amountForThisMonth;
+                $totalRevenue += $amountPerMonth;
             }
         }
 
