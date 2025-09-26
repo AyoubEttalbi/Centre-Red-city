@@ -604,7 +604,7 @@ private function calculateAdminEarningsForComparison()
     // Get all paid amounts from invoices, distributed across selected months
     try {
         $invoices = DB::table('invoices')
-            ->select('id', 'billDate', 'amountPaid', 'selected_months', 'months')
+            ->select('id', 'billDate', 'amountPaid', 'selected_months', 'months', 'includePartialMonth', 'partialMonthAmount')
             ->whereNull('deleted_at')
             ->where('billDate', '>=', $startDate)
             ->get();
@@ -631,8 +631,50 @@ private function calculateAdminEarningsForComparison()
                 $selectedMonths = [$billDate->format('Y-m')];
             }
             
-            // Distribute amount across selected months
-            $amountPerMonth = count($selectedMonths) > 0 ? $amountPaid / count($selectedMonths) : $amountPaid;
+            // Handle partial month invoices - add billMonth to selectedMonths if needed
+            $includePartialMonth = $invoice->includePartialMonth ?? false;
+            $partialMonthAmount = $invoice->partialMonthAmount ?? 0;
+            $billMonth = null;
+            
+            if (!empty($invoice->billDate)) {
+                $billMonth = \Carbon\Carbon::parse($invoice->billDate)->format('Y-m');
+            }
+            
+            if ($includePartialMonth && $partialMonthAmount > 0 && $billMonth) {
+                if (!in_array($billMonth, $selectedMonths)) {
+                    $selectedMonths[] = $billMonth;
+                }
+            }
+            
+            // Calculate amounts for each month
+            $teacherAmountForPartial = 0;
+            $fullMonthsAmount = 0;
+            $countFullMonths = 0;
+
+            if ($includePartialMonth && $partialMonthAmount > 0) {
+                $teacherAmountForPartial = (float)$partialMonthAmount;
+
+                // Count full months (exclude billMonth if it was inserted for partial)
+                $countFullMonths = count(array_filter($selectedMonths, function($m) use ($billMonth) {
+                    return $m !== $billMonth;
+                }));
+
+                $remainingAmount = $amountPaid - $teacherAmountForPartial;
+                if ($remainingAmount < 0) {
+                    // Safety: if numbers are inconsistent, fallback to equal split across months
+                    $remainingAmount = max(0, $amountPaid);
+                }
+
+                if ($countFullMonths > 0) {
+                    $fullMonthsAmount = $remainingAmount / $countFullMonths;
+                } else {
+                    $fullMonthsAmount = 0;
+                }
+            } else {
+                // No partial month: split total across all selected months
+                $countFullMonths = count($selectedMonths);
+                $fullMonthsAmount = $countFullMonths > 0 ? ($amountPaid / $countFullMonths) : 0;
+            }
             
             foreach ($selectedMonths as $monthYear) {
                 if (empty($monthYear)) continue;
@@ -650,7 +692,9 @@ private function calculateAdminEarningsForComparison()
                     ];
                 }
                 
-                $monthlyEarnings[$key]['totalPaid'] += $amountPerMonth;
+                // Calculate the correct amount for this month
+                $amountForThisMonth = ($includePartialMonth && $partialMonthAmount > 0 && $monthYear === $billMonth) ? $teacherAmountForPartial : $fullMonthsAmount;
+                $monthlyEarnings[$key]['totalPaid'] += $amountForThisMonth;
             }
         }
         
@@ -2112,8 +2156,8 @@ public function processMonthRecurringTransactions(Request $request)
                 $q->whereJsonContains('teachers', [['teacherId' => (string)$teacherId]]);
             })
             ->with(['invoices' => function($query) {
-                // Only include non-deleted invoices with payments
-                $query->whereNull('deleted_at')->where('amountPaid', '>', 0);
+                // Only include non-deleted invoices (same as TeacherController)
+                $query->whereNull('deleted_at');
             }, 'student', 'student.school', 'student.class', 'offer'])
             ->get();
         
@@ -2140,6 +2184,18 @@ public function processMonthRecurringTransactions(Request $request)
                 $selectedMonths = [$invoice->billDate ? $invoice->billDate->format('Y-m') : null];
             }
             
+            // Determine bill month (format YYYY-MM) for possible partial-month inclusion
+            $billMonth = $invoice->billDate ? ($invoice->billDate instanceof \Carbon\Carbon ? $invoice->billDate->format('Y-m') : date('Y-m', strtotime($invoice->billDate))) : null;
+            
+            // If this invoice includes a partial month payment, ensure the bill month is present
+            // so the partial-month row can appear when filtering by the bill month (current month).
+            if ($invoice->includePartialMonth && $invoice->partialMonthAmount > 0 && $billMonth) {
+                if (!in_array($billMonth, $selectedMonths)) {
+                    // Add billMonth to selectedMonths so partial-month row appears when filtering by bill month
+                    $selectedMonths[] = $billMonth;
+                }
+            }
+            
             foreach ($membership->teachers as $teacherData) {
                 if (!isset($teacherData['teacherId'])) continue;
                 if ($teacherId && (string)$teacherData['teacherId'] !== (string)$teacherId) continue;
@@ -2161,17 +2217,41 @@ public function processMonthRecurringTransactions(Request $request)
                 // Calculate teacher earnings per month (respect partial-month logic like TeacherController)
                 $totalTeacherAmount = $invoice->amountPaid * ($teacherPercentage / 100);
                 $monthsCount = count($selectedMonths);
-                $earningsPerMonth = 0;
-                if ($monthsCount > 0) {
-                    $includePartialMonth = $invoice->includePartialMonth ?? false;
-                    $partialMonthAmount = $invoice->partialMonthAmount ?? 0;
-                    if ($includePartialMonth && $partialMonthAmount > 0) {
-                        // Use partial month amount for each month
-                        $earningsPerMonth = $partialMonthAmount * ($teacherPercentage / 100);
-                    } else {
-                        // Split the total across all selected months
-                        $earningsPerMonth = $totalTeacherAmount / $monthsCount;
+                
+                // Get partial month information
+                $includePartialMonth = $invoice->includePartialMonth ?? false;
+                $partialMonthAmount = $invoice->partialMonthAmount ?? 0;
+                
+                // billMonth already calculated above
+                
+                // Calculate per-month amounts taking includePartialMonth into account
+                $teacherAmountForPartial = 0;
+                $fullMonthsAmount = 0;
+                $countFullMonths = 0;
+
+                if ($includePartialMonth && $partialMonthAmount > 0) {
+                    $teacherAmountForPartial = $partialMonthAmount * ($teacherPercentage / 100);
+
+                    // Count full months (exclude billMonth if it was inserted for partial)
+                    $countFullMonths = count(array_filter($selectedMonths, function($m) use ($billMonth) {
+                        return $m !== $billMonth;
+                    }));
+
+                    $remainingTeacherAmount = $totalTeacherAmount - $teacherAmountForPartial;
+                    if ($remainingTeacherAmount < 0) {
+                        // Safety: if numbers are inconsistent, fallback to equal split across months
+                        $remainingTeacherAmount = max(0, $totalTeacherAmount);
                     }
+
+                    if ($countFullMonths > 0) {
+                        $fullMonthsAmount = $remainingTeacherAmount / $countFullMonths;
+                    } else {
+                        $fullMonthsAmount = 0;
+                    }
+                } else {
+                    // No partial month: split total across all selected months
+                    $countFullMonths = count($selectedMonths);
+                    $fullMonthsAmount = $countFullMonths > 0 ? ($totalTeacherAmount / $countFullMonths) : 0;
                 }
                 
                 // Distribute earnings across all selected months
@@ -2196,7 +2276,9 @@ public function processMonthRecurringTransactions(Request $request)
                         ];
                     }
                     
-                    $earnings[$key]['totalEarned'] += $earningsPerMonth;
+                    // Calculate the correct amount for this month
+                    $amountForThisMonth = ($includePartialMonth && $partialMonthAmount > 0 && $selectedMonth === $billMonth) ? $teacherAmountForPartial : $fullMonthsAmount;
+                    $earnings[$key]['totalEarned'] += $amountForThisMonth;
                     $earnings[$key]['invoiceCount'] += 1; // Count each month as separate invoice (same as TeacherController)
                     
                     // Update lastPaymentDate if this invoice is newer
@@ -2253,8 +2335,8 @@ public function processMonthRecurringTransactions(Request $request)
                 $q->whereJsonContains('teachers', [['teacherId' => (string)$teacherId]]);
             })
             ->with(['invoices' => function($query) {
-                // Only include non-deleted invoices with payments
-                $query->whereNull('deleted_at')->where('amountPaid', '>', 0);
+                // Only include non-deleted invoices (same as TeacherController)
+                $query->whereNull('deleted_at');
             }, 'student', 'student.school', 'student.class', 'offer'])
             ->get();
         
@@ -2281,6 +2363,18 @@ public function processMonthRecurringTransactions(Request $request)
                 $selectedMonths = [$invoice->billDate ? $invoice->billDate->format('Y-m') : null];
             }
             
+            // Handle partial month invoices - add billMonth to selectedMonths if needed
+            $includePartialMonth = $invoice->includePartialMonth ?? false;
+            $partialMonthAmount = $invoice->partialMonthAmount ?? 0;
+            $billMonth = $invoice->billDate ? ($invoice->billDate instanceof \Carbon\Carbon ? $invoice->billDate->format('Y-m') : date('Y-m', strtotime($invoice->billDate))) : null;
+            
+            // If this invoice includes a partial month payment, ensure the bill month is present
+            if ($includePartialMonth && $partialMonthAmount > 0 && $billMonth) {
+                if (!in_array($billMonth, $selectedMonths)) {
+                    array_unshift($selectedMonths, $billMonth);
+                }
+            }
+            
             // Create one row per month (same logic as TeacherController)
             foreach ($selectedMonths as $selectedMonth) {
                 if (empty($selectedMonth)) continue;
@@ -2303,14 +2397,42 @@ public function processMonthRecurringTransactions(Request $request)
                             // Calculate teacher earnings per month (respect partial-month logic like TeacherController)
                             $totalTeacherAmount = $invoice->amountPaid * ($teacherPercentage / 100);
                             $monthsCount = count($selectedMonths);
+                            
+                            // Partial month information already calculated above
+                            
                             if ($monthsCount > 0) {
-                                $includePartialMonth = $invoice->includePartialMonth ?? false;
-                                $partialMonthAmount = $invoice->partialMonthAmount ?? 0;
+                                // Calculate per-month amounts taking includePartialMonth into account
+                                $teacherAmountForPartial = 0;
+                                $fullMonthsAmount = 0;
+                                $countFullMonths = 0;
+
                                 if ($includePartialMonth && $partialMonthAmount > 0) {
-                                    $teacherShare = $partialMonthAmount * ($teacherPercentage / 100);
+                                    $teacherAmountForPartial = $partialMonthAmount * ($teacherPercentage / 100);
+
+                                    // Count full months (exclude billMonth if it was inserted for partial)
+                                    $countFullMonths = count(array_filter($selectedMonths, function($m) use ($billMonth) {
+                                        return $m !== $billMonth;
+                                    }));
+
+                                    $remainingTeacherAmount = $totalTeacherAmount - $teacherAmountForPartial;
+                                    if ($remainingTeacherAmount < 0) {
+                                        // Safety: if numbers are inconsistent, fallback to equal split across months
+                                        $remainingTeacherAmount = max(0, $totalTeacherAmount);
+                                    }
+
+                                    if ($countFullMonths > 0) {
+                                        $fullMonthsAmount = $remainingTeacherAmount / $countFullMonths;
+                                    } else {
+                                        $fullMonthsAmount = 0;
+                                    }
                                 } else {
-                                    $teacherShare = $totalTeacherAmount / $monthsCount;
+                                    // No partial month: split total across all selected months
+                                    $countFullMonths = count($selectedMonths);
+                                    $fullMonthsAmount = $countFullMonths > 0 ? ($totalTeacherAmount / $countFullMonths) : 0;
                                 }
+                                
+                                // Calculate the correct amount for this specific month
+                                $teacherShare = ($includePartialMonth && $partialMonthAmount > 0 && $selectedMonth === $billMonth) ? $teacherAmountForPartial : $fullMonthsAmount;
                             } else {
                                 $teacherShare = 0;
                             }
@@ -2378,7 +2500,7 @@ public function processMonthRecurringTransactions(Request $request)
 
             // Revenue from invoices distributed across selected_months
             $invoices = DB::table('invoices')
-                ->select('id', 'billDate', 'amountPaid', 'selected_months')
+                ->select('id', 'billDate', 'amountPaid', 'selected_months', 'includePartialMonth', 'partialMonthAmount')
                 ->whereNull('deleted_at')
                 ->get();
 
@@ -2400,10 +2522,33 @@ public function processMonthRecurringTransactions(Request $request)
                     }
                 }
 
+                // Handle partial month invoices - add billMonth to selectedMonths if needed
+                $includePartialMonth = $invoice->includePartialMonth ?? false;
+                $partialMonthAmount = $invoice->partialMonthAmount ?? 0;
+                $billMonth = null;
+                
+                if (!empty($invoice->billDate)) {
+                    $billMonth = Carbon::parse($invoice->billDate)->format('Y-m');
+                }
+                
+                if ($includePartialMonth && $partialMonthAmount > 0 && $billMonth) {
+                    if (!in_array($billMonth, $selectedMonths)) {
+                        $selectedMonths[] = $billMonth;
+                    }
+                }
+
                 if (in_array($targetMonthKey, $selectedMonths, true)) {
-                    $monthsCount = max(count($selectedMonths), 1);
-                    $amountPerMonth = (float)$invoice->amountPaid / $monthsCount;
-                    $totalRevenue += $amountPerMonth;
+                    // Calculate the correct amount for this month
+                    if ($includePartialMonth && $partialMonthAmount > 0 && $targetMonthKey === $billMonth) {
+                        // This is the partial month - use partialMonthAmount
+                        $amountForThisMonth = (float)$partialMonthAmount;
+                    } else {
+                        // This is a full month - split the remaining amount
+                        $monthsCount = max(count($selectedMonths), 1);
+                        $amountForThisMonth = (float)$invoice->amountPaid / $monthsCount;
+                    }
+                    
+                    $totalRevenue += $amountForThisMonth;
                     $invoiceCountForMonth += 1;
                 }
             }
@@ -2503,7 +2648,7 @@ public function processMonthRecurringTransactions(Request $request)
         $targetMonthKey = sprintf('%04d-%02d', $year, $month);
 
         $invoices = DB::table('invoices')
-            ->select('id', 'billDate', 'amountPaid', 'selected_months')
+            ->select('id', 'billDate', 'amountPaid', 'selected_months', 'includePartialMonth', 'partialMonthAmount')
             ->whereNull('deleted_at')
             ->get();
 
@@ -2523,18 +2668,40 @@ public function processMonthRecurringTransactions(Request $request)
                 }
             }
 
-            $monthsCount = max(count($selectedMonths), 1);
+            // Handle partial month invoices
+            $includePartialMonth = $invoice->includePartialMonth ?? false;
+            $partialMonthAmount = $invoice->partialMonthAmount ?? 0;
+            $billMonth = $invoice->billDate ? Carbon::parse($invoice->billDate)->format('Y-m') : null;
+            
+            // If this invoice includes a partial month payment, ensure the bill month is present
+            if ($includePartialMonth && $partialMonthAmount > 0 && $billMonth) {
+                if (!in_array($billMonth, $selectedMonths)) {
+                    array_unshift($selectedMonths, $billMonth);
+                }
+            }
+
             if (in_array($targetMonthKey, $selectedMonths, true)) {
-                $amountPerMonth = (float)$invoice->amountPaid / $monthsCount;
+                // Calculate the correct amount for this month
+                if ($includePartialMonth && $partialMonthAmount > 0 && $targetMonthKey === $billMonth) {
+                    // This is the partial month - use partialMonthAmount
+                    $amountForThisMonth = (float)$partialMonthAmount;
+                } else {
+                    // This is a full month - split the remaining amount
+                    $monthsCount = max(count($selectedMonths), 1);
+                    $amountForThisMonth = (float)$invoice->amountPaid / $monthsCount;
+                }
+                
                 $items[] = [
                     'invoiceId' => $invoice->id,
                     'billDate' => $invoice->billDate,
                     'amountPaid' => (float)$invoice->amountPaid,
-                    'monthsCount' => $monthsCount,
+                    'monthsCount' => count($selectedMonths),
                     'selectedMonths' => $selectedMonths,
-                    'allocatedToTargetMonth' => round($amountPerMonth, 2),
+                    'allocatedToTargetMonth' => round($amountForThisMonth, 2),
+                    'isPartialMonth' => $includePartialMonth && $targetMonthKey === $billMonth,
+                    'partialMonthAmount' => $partialMonthAmount
                 ];
-                $totalRevenue += $amountPerMonth;
+                $totalRevenue += $amountForThisMonth;
             }
         }
 
