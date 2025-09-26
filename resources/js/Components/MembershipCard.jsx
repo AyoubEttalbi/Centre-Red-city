@@ -34,9 +34,26 @@ export default function MembershipCard({
             : "Enseignant inconnu";
     };
 
-    // Helper function to check if the membership has an unpaid invoice for the current month
-    const hasUnpaidInvoice = (membership) => {
-        return membership.payment_status !== "paid";
+    // Helper function to get payment status for a membership
+    const getPaymentStatus = (membership) => {
+        // Check if there are any invoices for this membership
+        const membershipInvoices = membership.invoices || [];
+        
+        if (membershipInvoices.length === 0) {
+            return { status: "not_paid", label: "Non payé", color: "red" };
+        }
+        
+        // Calculate total amounts from all invoices for this membership
+        const totalAmount = membershipInvoices.reduce((sum, invoice) => sum + (parseFloat(invoice.totalAmount) || 0), 0);
+        const totalPaid = membershipInvoices.reduce((sum, invoice) => sum + (parseFloat(invoice.amountPaid) || 0), 0);
+        
+        if (totalPaid === 0) {
+            return { status: "not_paid", label: "Non payé", color: "red" };
+        } else if (totalPaid < totalAmount) {
+            return { status: "not_fully_paid", label: "Non entièrement payé", color: "orange" };
+        } else {
+            return { status: "paid", label: "Payé", color: "green" };
+        }
     };
 
     // Sort memberships: active ones first, then deleted ones
@@ -77,16 +94,26 @@ export default function MembershipCard({
                                         </span>
                                     )}
                                 </span>
-                                {!membership.deleted_at && hasUnpaidInvoice(membership) ? (
-                                    <div className="flex items-center">
-                                        <AlertCircle className="h-5 w-5 text-amber-500" />
-                                        <span className="text-xs text-amber-600 ml-1">
-                                            Impayé
-                                        </span>
-                                    </div>
-                                ) : (
-                                    <Check className="h-5 w-5 text-green-500" />
-                                )}
+                                {!membership.deleted_at && (() => {
+                                    const paymentStatus = getPaymentStatus(membership);
+                                    return (
+                                        <div className="flex items-center">
+                                            {paymentStatus.status === "paid" ? (
+                                                <Check className="h-5 w-5 text-green-500" />
+                                            ) : (
+                                                <AlertCircle className={`h-5 w-5 ${
+                                                    paymentStatus.color === "red" ? "text-red-500" : "text-orange-500"
+                                                }`} />
+                                            )}
+                                            <span className={`text-xs ml-1 ${
+                                                paymentStatus.color === "green" ? "text-green-600" :
+                                                paymentStatus.color === "orange" ? "text-orange-600" : "text-red-600"
+                                            }`}>
+                                                {paymentStatus.label}
+                                            </span>
+                                        </div>
+                                    );
+                                })()}
                             </div>
                             <div className="space-y-2">
                                 <div className="flex items-center gap-2 text-gray-700 font-medium">

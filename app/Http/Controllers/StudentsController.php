@@ -485,9 +485,44 @@ protected function transformStudentData($student)
         // Fetch memberships for the student (including soft-deleted ones)
         $memberships = Membership::withTrashed()
             ->where('student_id', $student->id)
-            ->with(['offer'])
+            ->with(['offer', 'invoices'])
             ->get()
             ->map(function ($membership) {
+                // Process invoices for this membership
+                $membershipInvoices = $membership->invoices->map(function ($invoice) {
+                    // Always send selectedMonths as array if present
+                    $selectedMonths = [];
+                    if (isset($invoice->selected_months)) {
+                        if (is_string($invoice->selected_months)) {
+                            $decoded = json_decode($invoice->selected_months, true);
+                            if (is_array($decoded)) {
+                                $selectedMonths = $decoded;
+                            }
+                        } elseif (is_array($invoice->selected_months)) {
+                            $selectedMonths = $invoice->selected_months;
+                        }
+                    }
+                    
+                    return [
+                        'id' => $invoice->id,
+                        'membership_id' => $invoice->membership_id,
+                        'months' => $invoice->months,
+                        'billDate' => $invoice->billDate,
+                        'creationDate' => $invoice->creationDate,
+                        'totalAmount' => (float) $invoice->totalAmount,
+                        'amountPaid' => (float) $invoice->amountPaid,
+                        'rest' => (float) $invoice->rest,
+                        'endDate' => $invoice->endDate,
+                        'includePartialMonth' => $invoice->includePartialMonth,
+                        'partialMonthAmount' => (float) $invoice->partialMonthAmount,
+                        'last_payment' => $invoice->updated_at,
+                        'created_at' => $invoice->created_at,
+                        'selectedMonths' => $selectedMonths,
+                        'type' => $invoice->type,
+                        'assurance_amount' => (float) $invoice->assurance_amount,
+                    ];
+                });
+
                 return [
                     'id' => $membership->id,
                     'offer_name' => optional($membership->offer)->offer_name,
@@ -500,6 +535,7 @@ protected function transformStudentData($student)
                     'start_date' => $membership->start_date,
                     'end_date' => $membership->end_date,
                     'deleted_at' => $membership->deleted_at, // Include deletion status
+                    'invoices' => $membershipInvoices, // Include invoices for this membership
                 ];
             });
 

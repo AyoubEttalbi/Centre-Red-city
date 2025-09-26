@@ -622,11 +622,35 @@ const SingleStudentPage = ({
                             <span className="flex flex-row items-center">
                                 <Users className="h-5 w-5 mr-3" />
                                 Adhésions :
-                                {student.memberships && student.memberships.filter((m) => m.payment_status !== "paid" && !m.deleted_at).length > 0 && (
-                                    <span className="ml-2 bg-amber-100 text-amber-800 text-xs font-medium px-2 py-0.5 rounded-full">
-                                        {student.memberships.filter((m) => m.payment_status !== "paid" && !m.deleted_at).length} impayée(s)
-                                    </span>
-                                )}
+                                {student.memberships && (() => {
+                                    const getMembershipPaymentStatus = (membership) => {
+                                        const membershipInvoices = membership.invoices || [];
+                                        if (membershipInvoices.length === 0) return "not_paid";
+                                        
+                                        const totalAmount = membershipInvoices.reduce((sum, invoice) => sum + (parseFloat(invoice.totalAmount) || 0), 0);
+                                        const totalPaid = membershipInvoices.reduce((sum, invoice) => sum + (parseFloat(invoice.amountPaid) || 0), 0);
+                                        
+                                        if (totalPaid === 0) return "not_paid";
+                                        if (totalPaid < totalAmount) return "not_fully_paid";
+                                        return "paid";
+                                    };
+                                    
+                                    const unpaidCount = student.memberships.filter((m) => 
+                                        getMembershipPaymentStatus(m) === "not_paid" && !m.deleted_at
+                                    ).length;
+                                    const notFullyPaidCount = student.memberships.filter((m) => 
+                                        getMembershipPaymentStatus(m) === "not_fully_paid" && !m.deleted_at
+                                    ).length;
+                                    
+                                    if (unpaidCount > 0 || notFullyPaidCount > 0) {
+                                        return (
+                                            <span className="ml-2 bg-amber-100 text-amber-800 text-xs font-medium px-2 py-0.5 rounded-full">
+                                                {unpaidCount + notFullyPaidCount} impayée(s)
+                                            </span>
+                                        );
+                                    }
+                                    return null;
+                                })()}
                             </span>
                         </div>
                         <div className="flex items-center gap-2 md:gap-2 w-full md:w-auto mt-2 md:mt-0">
@@ -645,20 +669,49 @@ const SingleStudentPage = ({
                     </div>
                     {student.memberships ? (
                         <>
-                            {student.memberships.filter((m) => m.payment_status !== "paid" && !m.deleted_at).length > 0 && (
-                                <div className="mb-4 p-3 bg-amber-50 border-l-4 border-amber-500 rounded-md text-sm">
-                                    <div className="flex items-start gap-2">
-                                        <AlertCircle className="h-5 w-5 text-amber-500 mt-0.5 mr-2 flex-shrink-0" />
-                                        <div>
-                                            <h3 className="font-medium text-amber-800">Adhésions impayées</h3>
-                                            <p className="text-amber-700 mt-1">
-                                                Cet élève a {student.memberships.filter((m) => m.payment_status !== "paid" && !m.deleted_at).length} adhésion{student.memberships.filter((m) => m.payment_status !== "paid" && !m.deleted_at).length === 1 ? "" : "s"} impayée{student.memberships.filter((m) => m.payment_status !== "paid" && !m.deleted_at).length === 1 ? "" : "s"}.<br />
-                                                Ajoutez une facture pour compléter le processus de paiement.
-                                            </p>
+                            {(() => {
+                                const getMembershipPaymentStatus = (membership) => {
+                                    const membershipInvoices = membership.invoices || [];
+                                    if (membershipInvoices.length === 0) return "not_paid";
+                                    
+                                    const totalAmount = membershipInvoices.reduce((sum, invoice) => sum + (parseFloat(invoice.totalAmount) || 0), 0);
+                                    const totalPaid = membershipInvoices.reduce((sum, invoice) => sum + (parseFloat(invoice.amountPaid) || 0), 0);
+                                    
+                                    if (totalPaid === 0) return "not_paid";
+                                    if (totalPaid < totalAmount) return "not_fully_paid";
+                                    return "paid";
+                                };
+                                
+                                const unpaidCount = student.memberships.filter((m) => 
+                                    getMembershipPaymentStatus(m) === "not_paid" && !m.deleted_at
+                                ).length;
+                                const notFullyPaidCount = student.memberships.filter((m) => 
+                                    getMembershipPaymentStatus(m) === "not_fully_paid" && !m.deleted_at
+                                ).length;
+                                const totalUnpaid = unpaidCount + notFullyPaidCount;
+                                
+                                if (totalUnpaid > 0) {
+                                    return (
+                                        <div className="mb-4 p-3 bg-amber-50 border-l-4 border-amber-500 rounded-md text-sm">
+                                            <div className="flex items-start gap-2">
+                                                <AlertCircle className="h-5 w-5 text-amber-500 mt-0.5 mr-2 flex-shrink-0" />
+                                                <div>
+                                                    <h3 className="font-medium text-amber-800">Adhésions impayées</h3>
+                                                    <p className="text-amber-700 mt-1">
+                                                        Cet élève a {totalUnpaid} adhésion{totalUnpaid === 1 ? "" : "s"} impayée{totalUnpaid === 1 ? "" : "s"}.
+                                                        {notFullyPaidCount > 0 && (
+                                                            <span> ({notFullyPaidCount} non entièrement payée{notFullyPaidCount === 1 ? "" : "s"})</span>
+                                                        )}
+                                                        <br />
+                                                        Ajoutez une facture pour compléter le processus de paiement.
+                                                    </p>
+                                                </div>
+                                            </div>
                                         </div>
-                                    </div>
-                                </div>
-                            )}
+                                    );
+                                }
+                                return null;
+                            })()}
                             
                             {/* Toggle button for deleted memberships */}
                             <div className="mb-4 flex items-center justify-between">

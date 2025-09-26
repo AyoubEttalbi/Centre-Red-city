@@ -29,10 +29,29 @@ const InvoicesTable = ({
         return () => window.removeEventListener('resize', checkScreen);
     }, []);
 
-    // Count unpaid memberships (excluding deleted ones)
+    // Helper function to get membership payment status based on invoices
+    const getMembershipPaymentStatus = (membership) => {
+        const membershipInvoices = membership.invoices || [];
+        if (membershipInvoices.length === 0) return "not_paid";
+        
+        const totalAmount = membershipInvoices.reduce((sum, invoice) => sum + (parseFloat(invoice.totalAmount) || 0), 0);
+        const totalPaid = membershipInvoices.reduce((sum, invoice) => sum + (parseFloat(invoice.amountPaid) || 0), 0);
+        
+        if (totalPaid === 0) return "not_paid";
+        if (totalPaid < totalAmount) return "not_fully_paid";
+        return "paid";
+    };
+    
+    // Count unpaid and not fully paid memberships (excluding deleted ones)
     const unpaidMembershipsCount = Student_memberships.filter(
-        (m) => m.payment_status !== "paid" && !m.deleted_at,
+        (m) => getMembershipPaymentStatus(m) === "not_paid" && !m.deleted_at,
     ).length;
+    
+    const notFullyPaidMembershipsCount = Student_memberships.filter(
+        (m) => getMembershipPaymentStatus(m) === "not_fully_paid" && !m.deleted_at,
+    ).length;
+    
+    const totalUnpaidMemberships = unpaidMembershipsCount + notFullyPaidMembershipsCount;
 
     const formatDate = (dateString, formatType) => {
         if (!dateString) return "N/A";
@@ -150,9 +169,14 @@ const InvoicesTable = ({
                             studentId={studentId}
                             {...(isSmallScreen ? { screen: "small" } : {})}
                         />
-                        {unpaidMembershipsCount > 0 && (
+                        {totalUnpaidMemberships > 0 && (
                             <span className="bg-amber-100 text-amber-800 text-xs font-medium px-2 py-0.5 rounded-full">
-                                {unpaidMembershipsCount} non payé{unpaidMembershipsCount > 1 ? 's' : ''}
+                                {totalUnpaidMemberships} non payé{totalUnpaidMemberships > 1 ? 's' : ''}
+                                {notFullyPaidMembershipsCount > 0 && (
+                                    <span className="ml-1 text-orange-700">
+                                        ({notFullyPaidMembershipsCount} partiel{notFullyPaidMembershipsCount > 1 ? 's' : ''})
+                                    </span>
+                                )}
                             </span>
                         )}
                     </div>
@@ -160,13 +184,17 @@ const InvoicesTable = ({
             </div>
 
             {/* Unpaid memberships notification */}
-            {unpaidMembershipsCount > 0 && (
+            {totalUnpaidMemberships > 0 && (
                 <div className="p-3 bg-amber-50 border-b border-amber-200">
                     <div className="flex items-start">
                         <AlertCircle className="h-5 w-5 text-amber-500 mt-0.5 mr-2 flex-shrink-0" />
                         <div>
                             <p className="text-sm text-amber-700">
-                                Cet élève a {unpaidMembershipsCount} adhésion{unpaidMembershipsCount > 1 ? 's' : ''} non payée{unpaidMembershipsCount > 1 ? 's' : ''}. Créez une nouvelle facture pour compléter le paiement.
+                                Cet élève a {totalUnpaidMemberships} adhésion{totalUnpaidMemberships > 1 ? 's' : ''} non payée{totalUnpaidMemberships > 1 ? 's' : ''}.
+                                {notFullyPaidMembershipsCount > 0 && (
+                                    <span> ({notFullyPaidMembershipsCount} non entièrement payée{notFullyPaidMembershipsCount > 1 ? 's' : ''})</span>
+                                )}
+                                Créez une nouvelle facture pour compléter le paiement.
                             </p>
                         </div>
                     </div>
@@ -194,7 +222,10 @@ const InvoicesTable = ({
                                 Reste
                             </th>
                             <th className="p-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                Offre / Statut
+                                Offre
+                            </th>
+                            <th className="p-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                Statut de paiement
                             </th>
                             <th className="p-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                 Actions
@@ -262,7 +293,7 @@ const InvoicesTable = ({
                                             </span>
                                         )}
                                     </td>
-                                    <td className="p-3 text-sm text-gray-900">
+                                    <td className="p-3 text-sm text-gray-900" onClick={() => handleInvoiceClick(invoice)}>
                                         {invoice.type === 'assurance' ? (
                                             <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-50 text-yellow-700 border border-yellow-200">
                                                 Assurance
@@ -287,20 +318,35 @@ const InvoicesTable = ({
                                                                     (Supprimé)
                                                                 </span>
                                                             )}
-                                                            {invoice.rest > 0 ? (
-                                                                <span className="ml-2 bg-amber-100 text-amber-800 text-xs px-2 py-0.5 rounded-full">
-                                                                    Non payé
-                                                                </span>
-                                                            ) : (
-                                                                <span className="ml-2 bg-green-100 text-green-800 text-xs px-2 py-0.5 rounded-full">
-                                                                    Payé
-                                                                </span>
-                                                            )}
                                                         </>
                                                     );
                                                 })()}
                                             </div>
                                         )}
+                                    </td>
+                                    <td className="p-3 text-sm text-gray-900" onClick={() => handleInvoiceClick(invoice)}>
+                                        {(() => {
+                                            // Determine payment status based on amountPaid vs totalAmount
+                                            if (invoice.amountPaid === 0) {
+                                                return (
+                                                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800 border border-red-200">
+                                                        Non payé
+                                                    </span>
+                                                );
+                                            } else if (invoice.amountPaid < invoice.totalAmount) {
+                                                return (
+                                                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-800 border border-orange-200">
+                                                        Non entièrement payé
+                                                    </span>
+                                                );
+                                            } else {
+                                                return (
+                                                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 border border-green-200">
+                                                        Payé
+                                                    </span>
+                                                );
+                                            }
+                                        })()}
                                     </td>
                                     <td className="p-3 text-sm text-gray-900">
                                         <div className="flex items-center gap-2">
@@ -344,7 +390,7 @@ const InvoicesTable = ({
             {/* Empty state */}
             {(!invoices || invoices.length === 0) && (
                 <div className="p-8 text-center text-gray-500">
-                    {unpaidMembershipsCount > 0 ? (
+                    {totalUnpaidMemberships > 0 ? (
                         <div className="flex flex-col items-center">
                             <p className="mb-4">
                                 Aucune facture trouvée. Créez une facture pour compléter le paiement de l'adhésion.
