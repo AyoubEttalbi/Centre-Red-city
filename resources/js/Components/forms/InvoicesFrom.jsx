@@ -88,6 +88,10 @@ const InvoicesForm = ({
 
     // Track if user is actively typing in amountPaid field
     const [isTypingAmountPaid, setIsTypingAmountPaid] = useState(false);
+    // Track if user is actively typing in totalAmount field
+    const [isTypingTotal, setIsTypingTotal] = useState(false);
+    // Track if user manually overrode the computed total
+    const [totalOverridden, setTotalOverridden] = useState(false);
     
     // Track invalid input attempts
     const [showInvalidInput, setShowInvalidInput] = useState(false);
@@ -263,16 +267,37 @@ const InvoicesForm = ({
 
     const monthsAreConsecutive = areMonthsConsecutive(selectedMonths);
 
-    // Calculate the partial month amount. Use effectiveDate so that on update
-    // we count from the invoice creation date instead of the real current date.
+    // Calculate the partial month amount. Use the billDate (form field) so that
+    // the partial month charge is calculated from the selected billing date.
     const calculatePartialMonthAmount = () => {
         if (!selectedMembership || !includePartialMonth) return 0;
+
+        // Prefer the billDate form value; fall back to effectiveDate
+        const billDateValue = watch("billDate") || effectiveFormatted; // YYYY-MM-DD
+
+        // Parse billDateValue as local date (avoid timezone shifts)
+        let billDateObj = null;
+        try {
+            const ds = String(billDateValue).slice(0, 10);
+            const parts = ds.split('-').map(Number);
+            if (parts.length === 3 && parts.every((n) => Number.isFinite(n))) {
+                billDateObj = new Date(parts[0], parts[1] - 1, parts[2]);
+            }
+        } catch (e) {
+            billDateObj = null;
+        }
+        if (!billDateObj) {
+            const parsed = new Date(billDateValue);
+            if (!isNaN(parsed.getTime())) billDateObj = parsed;
+        }
+        if (!billDateObj) billDateObj = effectiveDate;
+
         const daysInMonth = new Date(
-            effectiveDate.getFullYear(),
-            effectiveDate.getMonth() + 1,
+            billDateObj.getFullYear(),
+            billDateObj.getMonth() + 1,
             0,
         ).getDate();
-        const remainingDays = daysInMonth - effectiveDate.getDate();
+        const remainingDays = daysInMonth - billDateObj.getDate();
         const dailyRate = selectedMembership.price / daysInMonth;
         return Math.round(dailyRate * remainingDays);
     };
@@ -290,16 +315,23 @@ const InvoicesForm = ({
     // If neither, total is 0
     const computedTotalAmount = (includePartialMonth ? partialMonthAmount : 0) + fullMonthsAmount;
     const totalAmount = computedTotalAmount;
-    const restAmount = totalAmount - (amountPaid ? Math.round(Number(amountPaid)) : 0);
+    // Compute rest amount from the totalAmount form value (allowing discounts)
+    const rawTotalValue = watch("totalAmount");
+    const parsedTotal = rawTotalValue === '' || rawTotalValue === undefined ? 0 : Math.round(Number(rawTotalValue));
+    const parsedAmountPaid = amountPaid ? Math.round(Number(amountPaid)) : 0;
+    const restAmount = parsedTotal - parsedAmountPaid;
 
-    // Keep the form value in sync with the computed totalAmount and restAmount
-    // Only update if the user is not actively typing in amountPaid field
+    // Keep the form totalAmount in sync with the computed totalAmount when user not typing
     useEffect(() => {
-        setValue("totalAmount", computedTotalAmount);
-    }, [computedTotalAmount, setValue]);
+        // Only sync computed total into the form when the user is not typing
+        // and hasn't manually overridden the total.
+        if (!isTypingTotal && !totalOverridden) {
+            setValue("totalAmount", computedTotalAmount);
+        }
+    }, [computedTotalAmount, setValue, isTypingTotal]);
 
+    // Keep the form rest in sync with total - paid when user is not typing in amountPaid
     useEffect(() => {
-        // Only update rest amount if user is not actively typing
         if (!isTypingAmountPaid) {
             setValue("rest", restAmount);
         }
@@ -309,8 +341,9 @@ const InvoicesForm = ({
     // When includePartialMonth is true we start from effectiveDate (invoice creation
     // date when updating) instead of the real today.
     const calculateBillingDate = () => {
-        // If partial month is included, start from effective date, else from the first selected month
-        if (includePartialMonth) return effectiveFormatted;
+        // If partial month is included, prefer the current billDate field value (so the form's
+        // selected billing date remains authoritative). Fall back to effectiveFormatted.
+        if (includePartialMonth) return watch("billDate") || effectiveFormatted;
         if (selectedMonths.length > 0) {
             const [year, month] = selectedMonths[0].split("-").map(Number);
             if (!isNaN(year) && !isNaN(month)) {
@@ -340,7 +373,25 @@ const InvoicesForm = ({
             }
         }
         if (includePartialMonth) {
-            const lastDay = new Date(effectiveDate.getFullYear(), effectiveDate.getMonth() + 1, 0);
+            // Use the billDate (form value) as the base to compute the end of that month
+            const bd = watch("billDate") || effectiveFormatted;
+            let billDateObj = null;
+            try {
+                const ds = String(bd).slice(0, 10);
+                const parts = ds.split('-').map(Number);
+                if (parts.length === 3 && parts.every((n) => Number.isFinite(n))) {
+                    billDateObj = new Date(parts[0], parts[1] - 1, parts[2]);
+                }
+            } catch (e) {
+                billDateObj = null;
+            }
+            if (!billDateObj) {
+                const parsed = new Date(bd);
+                if (!isNaN(parsed.getTime())) billDateObj = parsed;
+            }
+            if (!billDateObj) billDateObj = effectiveDate;
+
+            const lastDay = new Date(billDateObj.getFullYear(), billDateObj.getMonth() + 1, 0);
             return formatDateToYYYYMMDD(lastDay);
         }
         // Fallback: End of the first selected month or end of current school year if none selected
@@ -371,10 +422,11 @@ const InvoicesForm = ({
             // ...existing code...
             return;
         }
-        // Ensure amounts are integers
-        formData.totalAmount = Math.round(formData.totalAmount);
-        formData.amountPaid = Math.round(Number(formData.amountPaid));
-        formData.rest = Math.round(formData.rest);
+    // Ensure amounts are numbers and recompute rest from totalAmount - amountPaid
+    formData.totalAmount = Math.round(Number(formData.totalAmount || 0));
+    formData.amountPaid = Math.round(Number(formData.amountPaid || 0));
+    // Always compute rest server-side style: total minus paid
+    formData.rest = Math.round(formData.totalAmount - formData.amountPaid);
         formData.partialMonthAmount = Math.round(partialMonthAmount); // Use the calculated value
 
         // Debug logging
@@ -497,14 +549,33 @@ const InvoicesForm = ({
 
     // Handle partial month checkbox change (must be inside component)
     const handlePartialMonthChange = (e) => {
-        setIncludePartialMonth(e.target.checked);
-        setValue("includePartialMonth", e.target.checked);
+        const checked = e.target.checked;
+        setIncludePartialMonth(checked);
+        setValue("includePartialMonth", checked);
+        if (checked) {
+            // When enabling partial month, default the billDate to today so the
+            // partialMonthAmount is computed from the current date unless the user
+            // explicitly chooses another billDate.
+            const currentBill = watch("billDate");
+            if (!currentBill || currentBill !== todayFormatted) {
+                setValue("billDate", todayFormatted);
+            }
+        }
     };
 
-    // --- New logic: Block if the "current" month (based on effectiveDate)
+    // --- New logic: Block if the month matching the selected billDate
     // is selected and partial month is checked ---
-    const currentMonthValue = `${effectiveDate.getFullYear()}-${String(effectiveDate.getMonth() + 1).padStart(2, "0")}`;
-    const currentMonthSelected = selectedMonths.includes(currentMonthValue);
+    // Use the billDate form value as the authoritative date for the invoice
+    const watchedBillDate = watch("billDate") || effectiveFormatted; // YYYY-MM-DD
+    const billMonthValue = (() => {
+        try {
+            const d = watchedBillDate ? String(watchedBillDate).slice(0, 7) : null; // YYYY-MM
+            return d;
+        } catch (e) {
+            return null;
+        }
+    })();
+    const currentMonthSelected = billMonthValue ? selectedMonths.includes(billMonthValue) : false;
     const invalidPartialAndCurrentMonth = includePartialMonth && currentMonthSelected;
 
     const isAssurance = data?.type === 'assurance';
@@ -731,7 +802,13 @@ const InvoicesForm = ({
                                                     htmlFor="includePartialMonth"
                                                     className="text-sm font-medium text-gray-700"
                                                 >
-                                                    {`Inclure le paiement du mois partiel (${effectiveFormatted === todayFormatted ? "aujourd'hui" : `à partir du ${effectiveDate.toLocaleDateString('fr-FR')}`} jusqu'à la fin de ce mois)`}
+                                                    {(() => {
+                                                        // If billDate is today, show "aujourd'hui", otherwise show the billDate
+                                                        const bd = watchedBillDate || effectiveFormatted;
+                                                        const isToday = bd === todayFormatted;
+                                                        const displayDate = isToday ? "aujourd'hui" : (new Date(bd)).toLocaleDateString('fr-FR');
+                                                        return `Inclure le paiement du mois partiel (${displayDate} jusqu'à la fin de ce mois)`;
+                                                    })()}
                                                 </label>
                                             </div>
                                             {/* Partial Month Amount Display */}
@@ -759,7 +836,34 @@ const InvoicesForm = ({
                                                                     {partialMonthAmount} DH
                                                                 </span>
                                                                 {" "}
-                                                                (<span className="font-medium">{Math.ceil((new Date(effectiveDate.getFullYear(), effectiveDate.getMonth() + 1, 0).getDate() - effectiveDate.getDate()))}</span> jours restants dans le mois courant, calculés à partir du {effectiveDate.toLocaleDateString('fr-FR')})
+                                                                    (<span className="font-medium">{(() => {
+                                                                        // Compute remaining days based on the watched billDate
+                                                                        const bd = watchedBillDate || effectiveFormatted;
+                                                                        let billDateObj = null;
+                                                                        try {
+                                                                            const ds = String(bd).slice(0, 10);
+                                                                            const parts = ds.split('-').map(Number);
+                                                                            if (parts.length === 3 && parts.every((n) => Number.isFinite(n))) {
+                                                                                billDateObj = new Date(parts[0], parts[1] - 1, parts[2]);
+                                                                            }
+                                                                        } catch (e) {
+                                                                            billDateObj = null;
+                                                                        }
+                                                                        if (!billDateObj) {
+                                                                            const parsed = new Date(bd);
+                                                                            if (!isNaN(parsed.getTime())) billDateObj = parsed;
+                                                                        }
+                                                                        if (!billDateObj) billDateObj = effectiveDate;
+                                                                        const daysInMonth = new Date(billDateObj.getFullYear(), billDateObj.getMonth() + 1, 0).getDate();
+                                                                        return Math.ceil(daysInMonth - billDateObj.getDate());
+                                                                    })()}</span> jours restants dans le mois courant, calculés à partir du {(() => {
+                                                                        const bd = watchedBillDate || effectiveFormatted;
+                                                                        try {
+                                                                            const d = new Date(bd);
+                                                                            if (!isNaN(d.getTime())) return d.toLocaleDateString('fr-FR');
+                                                                        } catch (e) {}
+                                                                        return effectiveDate.toLocaleDateString('fr-FR');
+                                                                    })()})
                                                             </p>
                                                         </div>
                                                     </div>
@@ -839,9 +943,31 @@ const InvoicesForm = ({
                                     type="text"
                                     id="totalAmount"
                                     {...register("totalAmount")}
-                                    className="p-2 border border-gray-200 rounded-md bg-gray-100"
-                                    readOnly
-                                    value={isAssurance ? data?.assurance_amount || 0 : totalAmount}
+                                    className="p-2 border border-gray-200 rounded-md"
+                                    value={isAssurance ? data?.assurance_amount || 0 : watch("totalAmount")}
+                                    readOnly={isAssurance}
+                                    onFocus={() => setIsTypingTotal(true)}
+                                    onBlur={() => {
+                                        setIsTypingTotal(false);
+                                        // sanitize and round value on blur
+                                        const val = watch("totalAmount");
+                                        const num = val === '' ? 0 : Math.round(Number(val));
+                                        setValue("totalAmount", num);
+                                    }}
+                                    onChange={(e) => {
+                                        const v = e.target.value;
+                                        // Allow only numbers and optional decimal
+                                        if (/^[0-9]*\.?[0-9]*$/.test(v) || v === '') {
+                                            setValue("totalAmount", v);
+                                            // If the user typed a different value than computed, mark override
+                                            const numeric = v === '' ? 0 : Math.round(Number(v));
+                                            if (numeric !== computedTotalAmount) {
+                                                setTotalOverridden(true);
+                                            } else {
+                                                setTotalOverridden(false);
+                                            }
+                                        }
+                                    }}
                                 />
                                 <p className="text-xs text-gray-500">
                                     {includePartialMonth && partialMonthAmount > 0 && (
@@ -994,13 +1120,13 @@ const InvoicesForm = ({
                                 <path
                                     className="opacity-75"
                                     fill="currentColor"
-                                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                                    d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
                                 ></path>
                             </svg>
-                            Traitement...
+                            <span>{type === "create" ? "Créer une facture" : "Mettre à jour la facture"}</span>
                         </div>
                     ) : (
-                        `${type === "create" ? "Créer une facture" : "Mettre à jour la facture"}`
+                        <>{type === "create" ? "Créer une facture" : "Mettre à jour la facture"}</>
                     )}
                 </button>
             </div>

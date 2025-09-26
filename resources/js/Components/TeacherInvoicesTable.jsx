@@ -54,7 +54,34 @@ const TeacherInvoicesTable = ({
 
 
     // Backend filtering - no frontend filtering needed
-    const filteredInvoices = safeInvoices;
+    // But add a small fallback to correctly surface partial-month invoices
+    // (invoices that includePartialMonth and have selected_months containing the requested month)
+    const filteredInvoices = safeInvoices.filter((item) => {
+        // If no date filter set, keep as-is
+        if (!dateFilter) return true;
+
+        try {
+            // billDate month e.g. "2025-09"
+            const billMonth = item.billDate ? new Date(item.billDate).toISOString().slice(0, 7) : null;
+            if (billMonth === dateFilter) return true;
+
+            // month_display sometimes contains the month string
+            if (item.month_display && String(item.month_display).includes(dateFilter)) return true;
+
+            // selected_months can be an array or a JSON string like '["2025-10"]'
+            let sel = item.selected_months;
+            if (typeof sel === 'string') {
+                try { sel = JSON.parse(sel); } catch (e) { sel = []; }
+            }
+            if (Array.isArray(sel) && sel.includes(dateFilter)) return true;
+        } catch (e) {
+            // ignore parsing errors and fall through
+        }
+
+        // Default: keep the invoice (backend should be authoritative). If you want strict month-only
+        // behavior client-side change this to `return false;`
+        return true;
+    });
 
     // Function to apply filters via backend
     const applyFilters = (newFilters = {}) => {
@@ -312,7 +339,7 @@ const TeacherInvoicesTable = ({
                         <button
                             onClick={(e) => {
                                 e.stopPropagation();
-                                handleDownloadInvoice(item.id);
+                                handleDownloadInvoice(item.invoice_id);
                             }}
                             className="w-8 h-8 flex items-center justify-center rounded-full bg-lamaBlue hover:bg-sky-800 transition duration-300 text-white tooltip"
                             data-tip="Télécharger"

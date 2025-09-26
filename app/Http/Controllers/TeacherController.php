@@ -499,11 +499,26 @@ class TeacherController extends Controller
                     if (is_string($selectedMonths)) {
                         $selectedMonths = json_decode($selectedMonths, true) ?? [];
                     }
+
+                    // Determine bill month (format YYYY-MM) for possible partial-month inclusion
+                    $billMonth = $invoice->billDate ? ($invoice->billDate instanceof \Carbon\Carbon ? $invoice->billDate->format('Y-m') : date('Y-m', strtotime($invoice->billDate))) : null;
+
+                    // If no selected_months provided, fallback to billDate month
                     if (empty($selectedMonths)) {
-                        // Fallback: if no selected_months, use the billDate month
-                        $selectedMonths = [$invoice->billDate ? $invoice->billDate->format('Y-m') : null];
+                        $selectedMonths = [$billMonth];
                     }
-                    
+
+                    // If this invoice includes a partial month payment, ensure the bill month is present
+                    // so the partial-month row can appear when filtering by the bill month (current month).
+                    $includePartialMonth = $invoice->includePartialMonth ?? false;
+                    $partialMonthAmount = $invoice->partialMonthAmount ?? 0;
+                    if ($includePartialMonth && $partialMonthAmount > 0 && $billMonth) {
+                        if (!in_array($billMonth, $selectedMonths)) {
+                            // Prepend billMonth so partial-month row appears first (optional)
+                            array_unshift($selectedMonths, $billMonth);
+                        }
+                    }
+
             // Debug: Log invoice processing (only for first few invoices to avoid spam)
             if ($invoice->id <= 10) {
                 Log::info('Processing invoice', [
@@ -538,31 +553,47 @@ class TeacherController extends Controller
                     // Calculate teacher earnings per month
                     $offer = $invoice->offer;
                     $teacherSubject = $subject;
-                    
+
                     if (!$offer || !$teacherSubject || !is_array($offer->percentage)) {
                         return [];
                     }
-                    
+
                     // Get teacher percentage from offer
                     $teacherPercentage = $offer->percentage[$teacherSubject] ?? 0;
-                    
-                    // Calculate total teacher earnings from amountPaid
+
+                    // Calculate total teacher earnings from amountPaid (whole invoice)
                     $totalTeacherAmount = $invoice->amountPaid * ($teacherPercentage / 100);
-                    
-                    // Calculate monthly amount using includePartialMonth logic
-                    $monthlyAmount = 0;
-                    if (count($selectedMonths) > 0) {
-                        // Check if this invoice has includePartialMonth
-                        $includePartialMonth = $invoice->includePartialMonth ?? false;
-                        $partialMonthAmount = $invoice->partialMonthAmount ?? 0;
-                        
-                        if ($includePartialMonth && $partialMonthAmount > 0) {
-                            // Use partial month amount for each month
-                            $monthlyAmount = $partialMonthAmount * ($teacherPercentage / 100);
-                        } else {
-                            // Use full amount divided by months
-                            $monthlyAmount = $totalTeacherAmount / count($selectedMonths);
+
+                    // Prepare per-month amounts taking includePartialMonth into account
+                    // If partialMonthAmount exists, allocate that amount to the billMonth and
+                    // split the remainder across the other (full) months.
+                    $teacherAmountForPartial = 0;
+                    $fullMonthsAmount = 0;
+                    $countFullMonths = 0;
+
+                    if ($includePartialMonth && $partialMonthAmount > 0) {
+                        $teacherAmountForPartial = $partialMonthAmount * ($teacherPercentage / 100);
+
+                        // Count full months (exclude billMonth if it was inserted for partial)
+                        $countFullMonths = count(array_filter($selectedMonths, function($m) use ($billMonth) {
+                            return $m !== $billMonth;
+                        }));
+
+                        $remainingTeacherAmount = $totalTeacherAmount - $teacherAmountForPartial;
+                        if ($remainingTeacherAmount < 0) {
+                            // Safety: if numbers are inconsistent, fallback to equal split across months
+                            $remainingTeacherAmount = max(0, $totalTeacherAmount);
                         }
+
+                        if ($countFullMonths > 0) {
+                            $fullMonthsAmount = $remainingTeacherAmount / $countFullMonths;
+                        } else {
+                            $fullMonthsAmount = 0;
+                        }
+                    } else {
+                        // No partial month: split total across all selected months
+                        $countFullMonths = count($selectedMonths);
+                        $fullMonthsAmount = $countFullMonths > 0 ? ($totalTeacherAmount / $countFullMonths) : 0;
                     }
                     
                     // Create one row per month
@@ -605,6 +636,8 @@ class TeacherController extends Controller
                             $isMonthPaid = !in_array($month, $teacherPayment->months_rest_not_paid_yet ?? []);
                         }
                         
+                        $amountForThisMonth = ($includePartialMonth && $partialMonthAmount > 0 && $month === $billMonth) ? $teacherAmountForPartial : $fullMonthsAmount;
+
                         $monthlyInvoices[] = [
                             'id' => $invoice->id . '_' . $month, // Unique ID for each month
                             'invoice_id' => $invoice->id,
@@ -627,7 +660,7 @@ class TeacherController extends Controller
                             'endDate' => $invoice->endDate,
                             'includePartialMonth' => $invoice->includePartialMonth,
                             'partialMonthAmount' => $invoice->partialMonthAmount,
-                            'teacher_amount' => $monthlyAmount, // Monthly amount instead of total
+                            'teacher_amount' => $amountForThisMonth, // Monthly amount instead of total
                             'months_count' => 1, // Always 1 month per row
                             'total_months' => count($selectedMonths), // Total months for reference
                             'membership_deleted' => !is_null($membership->deleted_at), // Add membership deletion status
