@@ -48,9 +48,14 @@ class TeacherMembershipPaymentService
             }
         }
 
-        // Fallback: if no selected_months after processing partial month, use the billDate month
+        // Fallback: if no selected_months after processing partial month, use billDate month; if missing, use created_at month
         if (empty($selectedMonths)) {
-            $selectedMonths = [$invoice->billDate ? $invoice->billDate->format('Y-m') : null];
+            if ($invoice->billDate) {
+                $selectedMonths = [$invoice->billDate->format('Y-m')];
+            } else {
+                $createdMonth = $invoice->created_at ? $invoice->created_at->format('Y-m') : null;
+                $selectedMonths = [$createdMonth];
+            }
         }
 
         // Calculate the percentage of the amount paid (cumulatively for the invoice) to the total invoice amount
@@ -154,17 +159,25 @@ class TeacherMembershipPaymentService
             }
         }
 
-        if (!$offer || !$teacherSubject || !is_array($offer->percentage)) {
-            Log::warning('Cannot process teacher payment - missing subject or offer data', [
+        if (!$offer || !is_array($offer->percentage)) {
+            Log::warning('Missing offer or percentage array; proceeding with 0% for teacher', [
                 'teacher_id' => $teacherData['teacherId'],
-                'teacher_subject' => $teacherSubject,
                 'offer_id' => $offer->id ?? null,
                 'membership_id' => $membership->id
             ]);
-            return;
         }
 
-        $teacherPercentage = round((float)($offer->percentage[$teacherSubject] ?? 0), 2);
+        if (!$teacherSubject) {
+            Log::warning('Missing teacher subject in membership teachers; proceeding with 0% for teacher', [
+                'teacher_id' => $teacherData['teacherId'],
+                'membership_id' => $membership->id
+            ]);
+        }
+
+        $teacherPercentage = 0.0;
+        if ($offer && is_array($offer->percentage) && $teacherSubject) {
+            $teacherPercentage = round((float)($offer->percentage[$teacherSubject] ?? 0), 2);
+        }
 
         // 1. Calculate total teacher amount based on student's CUMULATIVE payment × teacher percentage
         $studentTotalPaidCumulative = round((float)($invoice->amountPaid ?? 0), 2);

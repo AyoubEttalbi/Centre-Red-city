@@ -2098,7 +2098,6 @@ public function processMonthRecurringTransactions(Request $request)
 
         // Get all memberships with payments (including partial payments) - same approach as TeacherController
         $memberships = \App\Models\Membership::withTrashed()
-            ->whereIn('payment_status', ['paid', 'pending'])
             ->when($schoolId, function($q) use ($schoolId) {
                 $q->whereHas('student', function($q2) use ($schoolId) {
                     $q2->where('schoolId', $schoolId);
@@ -2137,12 +2136,20 @@ public function processMonthRecurringTransactions(Request $request)
             }
             
             if (empty($selectedMonths)) {
-                // Fallback: if no selected_months, use the billDate month
-                $selectedMonths = [$invoice->billDate ? $invoice->billDate->format('Y-m') : null];
+                // Fallback: if no selected_months, use the billDate month; if missing, use created_at month
+                if ($invoice->billDate) {
+                    $selectedMonths = [$invoice->billDate->format('Y-m')];
+                } else {
+                    $createdMonth = $invoice->created_at ? $invoice->created_at->format('Y-m') : null;
+                    $selectedMonths = [$createdMonth];
+                }
             }
             
             // Determine bill month (format YYYY-MM) for possible partial-month inclusion
             $billMonth = $invoice->billDate ? ($invoice->billDate instanceof \Carbon\Carbon ? $invoice->billDate->format('Y-m') : date('Y-m', strtotime($invoice->billDate))) : null;
+            if (!$billMonth) {
+                $billMonth = $invoice->created_at ? $invoice->created_at->format('Y-m') : null;
+            }
             
             // If this invoice includes a partial month payment, ensure the bill month is present
             // so the partial-month row can appear when filtering by the bill month (current month).
@@ -2164,12 +2171,11 @@ public function processMonthRecurringTransactions(Request $request)
                 $offer = $invoice->offer;
                 $teacherSubject = $teacherData['subject'] ?? ($teacher->subjects->first()->name ?? 'Unknown');
                 
-                if (!$offer || !$teacherSubject || !is_array($offer->percentage)) {
-                    continue;
+                // Use 0% when offer/subject mapping is missing
+                $teacherPercentage = 0;
+                if ($offer && is_array($offer->percentage) && $teacherSubject) {
+                    $teacherPercentage = $offer->percentage[$teacherSubject] ?? 0;
                 }
-                
-                // Get teacher percentage from offer
-                $teacherPercentage = $offer->percentage[$teacherSubject] ?? 0;
                 
                 // Calculate teacher earnings per month (respect partial-month logic like TeacherController)
                 $totalTeacherAmount = $invoice->amountPaid * ($teacherPercentage / 100);
@@ -2277,7 +2283,6 @@ public function processMonthRecurringTransactions(Request $request)
         
         // Get all memberships with payments (including partial payments) - same approach as TeacherController
         $memberships = \App\Models\Membership::withTrashed()
-            ->whereIn('payment_status', ['paid', 'pending'])
             ->when($schoolId, function($q) use ($schoolId) {
                 $q->whereHas('student', function($q2) use ($schoolId) {
                     $q2->where('schoolId', $schoolId);
@@ -2316,14 +2321,22 @@ public function processMonthRecurringTransactions(Request $request)
             }
             
             if (empty($selectedMonths)) {
-                // Fallback: if no selected_months, use the billDate month
-                $selectedMonths = [$invoice->billDate ? $invoice->billDate->format('Y-m') : null];
+                // Fallback: if no selected_months, use the billDate month; if missing, fallback to created_at month
+                if ($invoice->billDate) {
+                    $selectedMonths = [$invoice->billDate->format('Y-m')];
+                } else {
+                    $createdMonth = $invoice->created_at ? $invoice->created_at->format('Y-m') : null;
+                    $selectedMonths = [$createdMonth];
+                }
             }
             
             // Handle partial month invoices - add billMonth to selectedMonths if needed
             $includePartialMonth = $invoice->includePartialMonth ?? false;
             $partialMonthAmount = $invoice->partialMonthAmount ?? 0;
             $billMonth = $invoice->billDate ? ($invoice->billDate instanceof \Carbon\Carbon ? $invoice->billDate->format('Y-m') : date('Y-m', strtotime($invoice->billDate))) : null;
+            if (!$billMonth) {
+                $billMonth = $invoice->created_at ? $invoice->created_at->format('Y-m') : null;
+            }
             
             // If this invoice includes a partial month payment, ensure the bill month is present
             if ($includePartialMonth && $partialMonthAmount > 0 && $billMonth) {
@@ -2347,6 +2360,8 @@ public function processMonthRecurringTransactions(Request $request)
                         $teacher = \App\Models\Teacher::find($teacherData['teacherId']);
                         $teacherSubject = $teacherData['subject'] ?? ($teacher ? $teacher->subjects->first()->name : null) ?? 'Unknown';
                         
+                        // Use 0% when offer/subject mapping is missing
+                        $teacherPercentage = 0;
                         if ($offer && $teacherSubject && is_array($offer->percentage)) {
                             // Get teacher percentage from offer
                             $teacherPercentage = $offer->percentage[$teacherSubject] ?? 0;

@@ -95,6 +95,8 @@ const InvoicesForm = ({
     
     // Track invalid input attempts
     const [showInvalidInput, setShowInvalidInput] = useState(false);
+    // Track server-side error (French-friendly)
+    const [serverError, setServerError] = useState("");
 
     // Format date to display in a more readable way
     const formatDateForDisplay = (dateString) => {
@@ -411,15 +413,30 @@ const InvoicesForm = ({
     };
 
     const onSubmit = (formData) => {
-        // ...existing code...
+       
+        if (formData.membership_id === "") {
+            delete formData.membership_id;
+        } else if (typeof formData.membership_id === "string" && /^\d+$/.test(formData.membership_id)) {
+            formData.membership_id = parseInt(formData.membership_id, 10);
+        }
         // Set offer_id from selected membership
         const selectedMembership = StudentMemberships.find(m => m.id == formData.membership_id);
         if (selectedMembership) {
             formData.offer_id = selectedMembership.offer_id;
         }
+        // Front-end blocking validations (French)
+        if (!isAssurance && !formData.membership_id) {
+            setServerError("Adhésion manquante: veuillez sélectionner une adhésion valide.");
+            return;
+        }
+        if (!includePartialMonth && selectedMonths.length === 0) {
+            setServerError("Veuillez sélectionner au moins un mois ou inclure le mois partiel.");
+            return;
+        }
         // Prevent submission if months are not consecutive
         if (!monthsAreConsecutive) {
             // ...existing code...
+            setServerError("Les mois sélectionnés doivent être consécutifs.");
             return;
         }
     // Ensure amounts are numbers and recompute rest from totalAmount - amountPaid
@@ -464,9 +481,12 @@ const InvoicesForm = ({
                 onSuccess: () => {
                     setOpen(false);
                     setLoading(false);
+                    setServerError("");
                 },
-                onError: () => {
+                onError: (errors) => {
                     setLoading(false);
+                    const msg = errors?.error || Object.values(errors || {})?.[0] || "Une erreur est survenue lors de la création de la facture.";
+                    setServerError(String(msg));
                 },
             });
         } else if (type === "update") {
@@ -476,10 +496,13 @@ const InvoicesForm = ({
                     setOpen(false);
                     setLoading(false);
                     // ...existing code...
+                    setServerError("");
                 },
-                onError: () => {
+                onError: (errors) => {
                     setLoading(false);
                     // ...existing code...
+                    const msg = errors?.error || Object.values(errors || {})?.[0] || "Une erreur est survenue lors de la mise à jour de la facture.";
+                    setServerError(String(msg));
                 },
             });
         }
@@ -585,6 +608,11 @@ const InvoicesForm = ({
             className="flex flex-col gap-6 p-6 bg-white shadow-lg rounded-lg"
             onSubmit={handleSubmit(onSubmit, onError)}
         >
+            {serverError && (
+                <div className="p-3 rounded-md bg-red-50 border border-red-200 text-red-700 text-sm">
+                    {serverError}
+                </div>
+            )}
             {/* Header with breadcrumb and title */}
             <div className="border-b pb-4">
                 <div className="flex items-center text-xs text-gray-500 mb-2">

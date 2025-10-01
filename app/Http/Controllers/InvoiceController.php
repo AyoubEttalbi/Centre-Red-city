@@ -135,6 +135,14 @@ class InvoiceController extends Controller
                 'includePartialMonth' => 'nullable|boolean',
                 'partialMonthAmount' => 'nullable|numeric',
                 'last_payment_date' => 'nullable|date',
+            ], [
+                'membership_id.required' => 'Adhésion manquante: veuillez sélectionner une adhésion valide.',
+                'student_id.required' => 'Étudiant manquant: veuillez sélectionner un étudiant.',
+                'months.required' => 'Le nombre de mois est obligatoire.',
+                'billDate.required' => 'La date de facturation est obligatoire.',
+                'totalAmount.required' => 'Le montant total est obligatoire.',
+                'amountPaid.required' => 'Le montant payé est obligatoire.',
+                'rest.required' => 'Le reste à payer est obligatoire.',
             ]);
 
 
@@ -162,6 +170,17 @@ class InvoiceController extends Controller
 
             // Fetch the membership (including deleted ones)
             $membership = Membership::withTrashed()->findOrFail($validated['membership_id']);
+
+            // Pré-vérifications bloquantes pour éviter des factures invalides
+            if (!$membership->offer) {
+                throw new \Exception('Offre introuvable pour cette adhésion. Veuillez vérifier l\'offre.');
+            }
+            if (!is_array($membership->teachers) || count($membership->teachers) === 0) {
+                throw new \Exception('Aucun enseignant n\'est associé à cette adhésion. Veuillez ajouter au moins un enseignant.');
+            }
+            if (!is_array($membership->offer->percentage)) {
+                throw new \Exception('L\'offre sélectionnée n\'a pas de pourcentages valides.');
+            }
             // Always set offer_id from membership
             $validated['offer_id'] = $membership->offer_id;
 
@@ -202,11 +221,13 @@ class InvoiceController extends Controller
             $membership->update($updateData);
 
             DB::commit();
-            return redirect()->back()->with('success', 'Invoice created successfully!');
+            return redirect()->back()->with('success', 'Facture créée avec succès.');
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Error creating invoice:', ['error' => $e->getMessage()]);
-            return redirect()->back()->withErrors(['error' => 'An error occurred while creating the invoice.']);
+            return redirect()->back()->withErrors([
+                'error' => 'Création de facture annulée: ' . $e->getMessage()
+            ])->withInput();
         }
     }
 
@@ -419,7 +440,7 @@ class InvoiceController extends Controller
 
             // Validate the incoming request
             $validated = $request->validate([
-                'membership_id' => 'integer',
+                'membership_id' => 'nullable|integer',
                 'student_id' => 'required|integer',
                 'months' => [
                     'required',
@@ -442,6 +463,13 @@ class InvoiceController extends Controller
                 'includePartialMonth' => 'nullable|boolean',
                 'partialMonthAmount' => 'nullable|numeric',
                 'last_payment_date' => 'nullable|date',
+            ], [
+                'student_id.required' => 'Étudiant manquant: veuillez sélectionner un étudiant.',
+                'months.required' => 'Le nombre de mois est obligatoire.',
+                'billDate.required' => 'La date de facturation est obligatoire.',
+                'totalAmount.required' => 'Le montant total est obligatoire.',
+                'amountPaid.required' => 'Le montant payé est obligatoire.',
+                'rest.required' => 'Le reste à payer est obligatoire.',
             ]);
 
             $invoice = Invoice::findOrFail($id);
@@ -476,8 +504,24 @@ class InvoiceController extends Controller
             }
             $validated['selected_months'] = json_encode($selectedMonths);
 
+            // Ensure membership_id exists: default to the invoice's current membership when not provided
+            if (empty($validated['membership_id'])) {
+                $validated['membership_id'] = $invoice->membership_id;
+            }
+
             // Fetch the membership (including deleted ones)
             $membership = Membership::withTrashed()->findOrFail($validated['membership_id']);
+
+            // Pré-vérifications bloquantes pour éviter des factures invalides
+            if (!$membership->offer) {
+                throw new \Exception('Offre introuvable pour cette adhésion. Veuillez vérifier l\'offre.');
+            }
+            if (!is_array($membership->teachers) || count($membership->teachers) === 0) {
+                throw new \Exception('Aucun enseignant n\'est associé à cette adhésion. Veuillez ajouter au moins un enseignant.');
+            }
+            if (!is_array($membership->offer->percentage)) {
+                throw new \Exception('L\'offre sélectionnée n\'a pas de pourcentages valides.');
+            }
             // Always set offer_id from membership
             $validated['offer_id'] = $membership->offer_id;
 
@@ -528,11 +572,13 @@ class InvoiceController extends Controller
             $membership->update($updateData);
 
             DB::commit();
-            return redirect()->back()->with('success', 'Invoice updated successfully!');
+            return redirect()->back()->with('success', 'Facture mise à jour avec succès.');
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Error updating invoice:', ['error' => $e->getMessage(), 'trace' => $e->getTraceAsString()]);
-            return redirect()->back()->withErrors(['error' => 'An error occurred while updating the invoice.']);
+            return redirect()->back()->withErrors([
+                'error' => 'Mise à jour de facture annulée: ' . $e->getMessage()
+            ])->withInput();
         }
     }
 

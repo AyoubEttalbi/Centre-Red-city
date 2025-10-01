@@ -24,6 +24,7 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rules;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Support\Facades\Log;
+use App\Models\Invoice;
 
 class TeacherController extends Controller
 {
@@ -283,6 +284,9 @@ class TeacherController extends Controller
      */
     public function show(Request $request, Teacher $teacher)
     {
+        Log::info('TeacherController@show', [
+            "invoices_all" => Invoice::all()
+        ]);
         try {
             // Eager load teacher relationships
             $teacher->load(['subjects', 'classes', 'schools']);
@@ -445,7 +449,6 @@ class TeacherController extends Controller
             
             // Fetch all memberships where the teacher is involved (including deleted ones)
             $memberships = Membership::withTrashed()
-                ->whereIn('payment_status', ['paid', 'pending'])
                 ->whereJsonContains('teachers', [['teacherId' => (string) $teacher->id]])
                 ->with(['invoices' => function($query) {
                     // Only include non-deleted invoices
@@ -502,8 +505,12 @@ class TeacherController extends Controller
 
                     // Determine bill month (format YYYY-MM) for possible partial-month inclusion
                     $billMonth = $invoice->billDate ? ($invoice->billDate instanceof \Carbon\Carbon ? $invoice->billDate->format('Y-m') : date('Y-m', strtotime($invoice->billDate))) : null;
+                    if (!$billMonth) {
+                        // Fallback to created_at when billDate is missing
+                        $billMonth = $invoice->created_at ? date('Y-m', strtotime($invoice->created_at)) : null;
+                    }
 
-                    // If no selected_months provided, fallback to billDate month
+                    // If no selected_months provided, fallback to billDate/created_at month
                     if (empty($selectedMonths)) {
                         $selectedMonths = [$billMonth];
                     }
@@ -554,12 +561,11 @@ class TeacherController extends Controller
                     $offer = $invoice->offer;
                     $teacherSubject = $subject;
 
-                    if (!$offer || !$teacherSubject || !is_array($offer->percentage)) {
-                        return [];
+                    // Get teacher percentage from offer when available; otherwise default to 0 but keep the row
+                    $teacherPercentage = 0;
+                    if ($offer && $teacherSubject && is_array($offer->percentage)) {
+                        $teacherPercentage = $offer->percentage[$teacherSubject] ?? 0;
                     }
-
-                    // Get teacher percentage from offer
-                    $teacherPercentage = $offer->percentage[$teacherSubject] ?? 0;
 
                     // Calculate total teacher earnings from amountPaid (whole invoice)
                     $totalTeacherAmount = $invoice->amountPaid * ($teacherPercentage / 100);
