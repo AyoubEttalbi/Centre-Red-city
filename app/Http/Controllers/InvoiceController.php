@@ -196,8 +196,12 @@ class InvoiceController extends Controller
             
             // Validate that payment records were created successfully
             if (!$paymentResult || !$paymentResult['success'] || (($paymentResult['created_records'] ?? 0) + ($paymentResult['updated_records'] ?? 0)) === 0) {
-                \Log::error('No payment records created', ['invoice_id' => $invoice->id, 'result' => $paymentResult]);
-                throw new \Exception('Failed to create teacher payment records: ' . implode(', ', $paymentResult['errors'] ?? ['Unknown error']));
+                Log::error('No payment records created', ['invoice_id' => $invoice->id, 'result' => $paymentResult]);
+                
+                // NEW: Create user-friendly error messages
+                $userFriendlyErrors = $this->convertToUserFriendlyErrors($paymentResult['errors'] ?? ['Unknown error occurred']);
+                
+                throw new \Exception($userFriendlyErrors[0]); // Show first error to user
             }
             
             Log::info('Payment records created successfully', [
@@ -205,6 +209,23 @@ class InvoiceController extends Controller
                 'created_records' => $paymentResult['created_records'] ?? 0,
                 'updated_records' => $paymentResult['updated_records'] ?? 0
             ]);
+
+            // NEW: Reconcile teacher payouts for initial invoice creation
+            if ($validated['amountPaid'] > 0) {
+                $reconcileResult = $paymentService->reconcilePaidMonthsForInvoice($invoice);
+                if (!$reconcileResult['success']) {
+                    Log::warning('Initial reconciliation reported issues', [
+                        'invoice_id' => $invoice->id,
+                        'errors' => $reconcileResult['errors']
+                    ]);
+                } else {
+                    Log::info('Initial reconciliation completed', [
+                        'invoice_id' => $invoice->id,
+                        'adjusted_records' => $reconcileResult['adjusted_records'],
+                        'total_delta' => $reconcileResult['total_delta']
+                    ]);
+                }
+            }
 
             // Always update start_date. Update end_date based on actual paid period
             $updateData = [
@@ -225,8 +246,17 @@ class InvoiceController extends Controller
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Error creating invoice:', ['error' => $e->getMessage()]);
+            
+            // NEW: Return proper error response
+            if (request()->expectsJson() || request()->header('Accept') === 'application/json') {
+                return $this->createErrorResponse([$e->getMessage()], [
+                    'invoice_data' => $request->except(['_token']),
+                    'validation_data' => $validated ?? []
+                ]);
+            }
+            
             return redirect()->back()->withErrors([
-                'error' => 'Création de facture annulée: ' . $e->getMessage()
+                'error' => $this->convertSingleError($e->getMessage()) ?: 'Création de facture annulée: ' . $e->getMessage()
             ])->withInput();
         }
     }
@@ -545,6 +575,23 @@ class InvoiceController extends Controller
                 throw new \Exception('Failed to process teacher payment records during invoice update');
             }
             
+            // NEW: Reconcile deltas whenever amountPaid changes (not only when fully paid)
+            if (round((float)($validated['amountPaid']), 2) != round((float)($previousAmountPaid), 2)) {
+                $reconcileResultAny = $paymentService->reconcilePaidMonthsForInvoice($invoice);
+                if (!$reconcileResultAny['success']) {
+                    Log::warning('Reconciliation (any change) reported issues', [
+                        'invoice_id' => $invoice->id,
+                        'errors' => $reconcileResultAny['errors']
+                    ]);
+                } else {
+                    Log::info('Reconciled teacher payouts after amount change', [
+                        'invoice_id' => $invoice->id,
+                        'adjusted_records' => $reconcileResultAny['adjusted_records'],
+                        'total_delta' => $reconcileResultAny['total_delta']
+                    ]);
+                }
+            }
+
             // If invoice is fully paid, reactivate any inactive payment records
             if ($invoice->amountPaid >= $invoice->totalAmount) {
                 $reactivationResult = $paymentService->reactivatePaymentRecords($invoice);
@@ -554,6 +601,8 @@ class InvoiceController extends Controller
                         'reactivated_count' => $reactivationResult['reactivated_records']
                     ]);
                 }
+
+                // Keep reconciliation for fully paid case as well (already handled above if amount changed)
             }
             // --- END TEACHER MEMBERSHIP PAYMENT LOGIC ---
 
@@ -576,8 +625,18 @@ class InvoiceController extends Controller
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Error updating invoice:', ['error' => $e->getMessage(), 'trace' => $e->getTraceAsString()]);
+            
+            // NEW: Return proper error response
+            if (request()->expectsJson() || request()->header('Accept') === 'application/json') {
+                return $this->createErrorResponse([$e->getMessage()], [
+                    'invoice_id' => $id,
+                    'invoice_data' => $request->except(['_token', '_method']),
+                    'validation_data' => $validated ?? []
+                ]);
+            }
+            
             return redirect()->back()->withErrors([
-                'error' => 'Mise à jour de facture annulée: ' . $e->getMessage()
+                'error' => $this->convertSingleError($e->getMessage()) ?: 'Mise à jour de facture annulée: ' . $e->getMessage()
             ])->withInput();
         }
     }
@@ -625,6 +684,58 @@ class InvoiceController extends Controller
         } catch (\Exception $e) {
             Log::error('Error deleting invoice:', ['error' => $e->getMessage()]);
             return redirect()->back()->withErrors(['error' => 'An error occurred while deleting the invoice.']);
+        }
+    }
+
+    /**
+     * NEW METHOD: Validate and fix invoice payment states
+     * Use this to diagnose and fix payment issues like invoice #837
+     */
+    public function validateInvoice($id)
+    {
+        try {
+            $invoice = Invoice::findOrFail($id);
+            $paymentService = new \App\Services\TeacherMembershipPaymentService();
+            
+            // Run comprehensive validation
+            $validationResult = $paymentService->validateInvoicePaymentState($invoice);
+            
+            // Run reconciliation to fix any issues
+            $reconcileResult = $paymentService->reconcilePaidMonthsForInvoice($invoice);
+            
+            $data = [
+                'invoice' => $invoice,
+                'validation' => $validationResult,
+                'reconciliation' => $reconcileResult,
+                'summary' => [
+                    'invoice_total' => $invoice->totalAmount,
+                    'amount_paid' => $invoice->amountPaid,
+                    'payment_percentage' => round(($invoice->amountPaid / $invoice->totalAmount) * 100, 2),
+                    'bill_date' => $invoice->billDate,
+                    'selected_months' => $invoice->selected_months,
+                ]
+            ];
+            
+            Log::info('Invoice validation completed', [
+                'invoice_id' => $invoice->id,
+                'validation_valid' => $validationResult['valid'],
+                'validation_errors' => $validationResult['errors'],
+                'validation_warnings' => $validationResult['warnings'],
+                'reconciliation_success' => $reconcileResult['success'],
+                'reconciliation_adjusted_records' => $reconcileResult['adjusted_records']
+            ]);
+            
+            return response()->json($data);
+            
+        } catch (\Exception $e) {
+            Log::error('Error validating invoice', [
+                'invoice_id' => $id,
+                'error' => $e->getMessage()
+            ]);
+            
+            return response()->json([
+                'error' => 'Failed to validate invoice: ' . $e->getMessage()
+            ], 500);
         }
     }
 
@@ -818,5 +929,108 @@ class InvoiceController extends Controller
             ->performedOn($model)
             ->withProperties($properties)
             ->log($description);
+    }
+
+    /**
+     * Convert technical validation errors to user-friendly messages
+     */
+    private function convertToUserFriendlyErrors(array $technicalErrors): array
+    {
+        $userFriendlyMessages = [];
+        
+        foreach ($technicalErrors as $error) {
+            $message = $this->convertSingleError($error);
+            if ($message) {
+                $userFriendlyMessages[] = $message;
+            }
+        }
+        
+        // If no specific conversion found, return generic message
+        if (empty($userFriendlyMessages)) {
+            $userFriendlyMessages[] = 'Une erreur s\'est produite lors de la création de la facture. Veuillez réessayer.';
+        }
+        
+        return $userFriendlyMessages;
+    }
+
+    /**
+     * Convert a single technical error to user-friendly message
+     */
+    private function convertSingleError(string $error): ?string
+    {
+        // Map technical errors to user-friendly messages
+        $errorMappings = [
+            // Offer percentage errors
+            'percentages don\'t sum to 100%' => 'La configuration des pourcentages enseignants n\'est pas complète. Veuillez vérifier les pourcentages dans l\'offre.',
+            'percentages exceed 100%' => 'Les pourcentages enseignants dépassent 100%. Veuillez ajuster les pourcentages dans l\'offre.',
+            'has invalid percentage configuration' => 'La configuration des pourcentages est invalide. Contactez l\'administrateur.',
+            'has no teachers assigned' => 'Aucun enseignant n\'est assigné à cette adhésion. Veuillez sélectionner des enseignants.',
+            'has no associated offer' => 'Aucune offre associée à cette adhésion. Veuillez sélectionner une offre valide.',
+            
+            // Membership errors
+            'No membership or teachers found' => 'Impossible de créer la facture: aucune information d\'adhésion trouvée.',
+            'has no teachers assigned' => 'Cette adhésion n\'a pas d\'enseignants assignés. Veuillez ajouter des enseignants.',
+            
+            // Data validation errors
+            'Math validation failed' => 'Les montants ne sont pas cohérents. Vérifiez le montant total, payé et le reste.',
+            'no selected months' => 'Aucun mois sélectionné pour cette facture. Veuillez sélectionner au moins un mois.',
+            
+            // Generic patterns
+            'Offer' => 'Problème avec la configuration de l\'offre. Vérifiez les paramètres de l\'offre.',
+            'Membership' => 'Problème avec la configuration de l\'adhésion. Vérifiez les paramètres de l\'adhésion.',
+            'Teacher' => 'Problème avec la configuration des enseignants. Vérifiez les enseignants assignés.',
+            'validation failed' => 'Les données saisies ne sont pas valides. Vérifiez tous les champs obligatoires.',
+            'permission denied' => 'Vous n\'avez pas les permissions pour effectuer cette action.',
+            'not found' => 'La ressource demandée est introuvable.',
+        ];
+        
+        // Check for exact matches first
+        foreach ($errorMappings as $technicalPattern => $userMessage) {
+            if (strpos($error, $technicalPattern) !== false) {
+                return $userMessage;
+            }
+        }
+        
+        // If no mapping found, return a default message
+        return 'Erreur lors du traitement: ' . substr($error, 0, 100) . (strlen($error) > 100 ? '...' : '');
+    }
+
+    /**
+     * Create detailed error response for frontend
+     */
+    private function createErrorResponse(array $errors, array $additionalData = [])
+    {
+        $userFriendlyErrors = $this->convertToUserFriendlyErrors($errors);
+        
+        return response()->json([
+            'success' => false,
+            'message' => 'Erreur lors de la création de la facture',
+            'errors' => $userFriendlyErrors,
+            'technical_errors' => $errors, // Keep technical errors for debugging
+            'data' => $additionalData,
+            'suggestions' => $this->getErrorSuggestions($errors)
+        ], 422);
+    }
+
+    /**
+     * Get helpful suggestions based on errors
+     */
+    private function getErrorSuggestions(array $errors): array
+    {
+        $suggestions = [];
+        
+        foreach ($errors as $error) {
+            if (strpos($error, 'percentages') !== false) {
+                $suggestions[] = 'Allez dans Gestion des Offres pour vérifier les pourcentages enseignants';
+            } elseif (strpos($error, 'teachers') !== false) {
+                $suggestions[] = 'Ajoutez des enseignants à cette adhésion dans la configuration';
+            } elseif (strpos($error, 'offer') !== false) {
+                $suggestions[] = 'Vérifiez que l\'offre est correctement configurée';
+            } elseif (strpos($error, 'validation failed') !== false) {
+                $suggestions[] = 'Vérifiez que tous les champs obligatoires sont remplis';
+            }
+        }
+        
+        return array_unique($suggestions);
     }
 }

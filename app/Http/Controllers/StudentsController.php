@@ -121,7 +121,7 @@ class StudentsController extends Controller
      public function index(Request $request)
      {
          // Initialize the query with eager loading for relationships
-         $query = Student::with(['class', 'school', 'level', 'memberships']);
+         $query = Student::with(['class', 'school', 'level', 'memberships.offer', 'memberships.invoices']);
          
          // Get the current user and their role
          $user = $request->user();
@@ -311,16 +311,77 @@ protected function applyFilters($query, $filters)
 }
 
 /**
+ * Calculate payment status counts for memberships
+ */
+protected function calculateMembershipPaymentStatus($memberships)
+{
+    $counts = [
+        'paid' => 0,
+        'partial' => 0,
+        'unpaid' => 0,
+        'total' => 0
+    ];
+
+    foreach ($memberships as $membership) {
+        // Skip soft-deleted memberships
+        if ($membership->deleted_at) {
+            continue;
+        }
+
+        $counts['total']++;
+
+        // Get all invoices for this membership
+        $invoices = $membership->invoices ?? collect();
+        
+        if ($invoices->isEmpty()) {
+            $counts['unpaid']++;
+            continue;
+        }
+
+        // Calculate total amounts
+        $totalAmount = $invoices->sum('totalAmount');
+        $amountPaid = $invoices->sum('amountPaid');
+
+        if ($amountPaid == 0) {
+            $counts['unpaid']++;
+        } elseif ($amountPaid < $totalAmount) {
+            $counts['partial']++;
+        } else {
+            $counts['paid']++;
+        }
+    }
+
+    return $counts;
+}
+
+/**
  * Transform student data for the frontend.
  */
 protected function transformStudentData($student)
 {
+    // Get offer names from active memberships (excluding assurance-only invoices)
+    $offerNames = $student->memberships
+        ->filter(function ($membership) {
+            return $membership->offer && $membership->offer->offer_name;
+        })
+        ->map(function ($membership) {
+            return $membership->offer->offer_name;
+        })
+        ->unique()
+        ->values()
+        ->implode(', ');
+
+    // Calculate payment status for memberships
+    $paymentStatusCounts = $this->calculateMembershipPaymentStatus($student->memberships);
+
     return [
         'id' => $student->id,
         'name' => $student->firstName . ' ' . $student->lastName,
         'studentId' => $student->massarCode,
         'phone' => $student->phoneNumber,
         'address' => $student->address,
+        'offerNames' => $offerNames ?: '', // Add offer names, empty string if none
+        'paymentStatus' => $paymentStatusCounts, // Add payment status breakdown
         'classId' => $student->classId,
         'schoolId' => $student->schoolId,
         'firstName' => $student->firstName,
