@@ -2,10 +2,10 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import InputField from "../InputField";
-import { router } from "@inertiajs/react";
+import { router, usePage } from "@inertiajs/react";
 
 const schema = z.object({
-    name: z.string().min(1, { message: "Class name is required!" }),
+    name: z.string().min(1, { message: "Le nom de la classe est obligatoire." }),
     level_id: z.any(),
     school_id: z.any(),
 });
@@ -29,6 +29,7 @@ const ClassesForm = ({
             school_id: data?.school_id || "",
         },
     });
+    const pageErrors = usePage().props?.errors || {};
 
     const onSubmit = (formData) => {
         if (type === "create") {
@@ -68,6 +69,9 @@ const ClassesForm = ({
                         error={errors.name}
                         defaultValue={data?.name}
                     />
+                    {pageErrors.name && (
+                        <p className="text-xs text-red-400">{pageErrors.name}</p>
+                    )}
                 </div>
                 <div className="flex flex-col gap-2 w-full md:w-1/3">
                     <label className="text-xs text-gray-600">Level</label>
@@ -88,6 +92,9 @@ const ClassesForm = ({
                             {errors.level_id.message}
                         </p>
                     )}
+                    {pageErrors.level_id && (
+                        <p className="text-xs text-red-400">{pageErrors.level_id}</p>
+                    )}
                 </div>
                 <div className="flex flex-col gap-2 w-full md:w-1/3">
                     <label className="text-xs text-gray-600">School</label>
@@ -107,6 +114,9 @@ const ClassesForm = ({
                         <p className="text-xs text-red-400">
                             {errors.school_id.message}
                         </p>
+                    )}
+                    {pageErrors.school_id && (
+                        <p className="text-xs text-red-400">{pageErrors.school_id}</p>
                     )}
                 </div>
             </div>

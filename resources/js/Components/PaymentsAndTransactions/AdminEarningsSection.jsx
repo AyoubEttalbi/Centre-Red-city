@@ -70,16 +70,27 @@ const AdminEarningsSection = ({ adminEarnings }) => {
     };
 
     const filteredEarnings = useMemo(() => {
-        return earningsData
-            .filter((item) => Number(item.year) === selectedYear)
+        const currentDate = new Date();
+        const currentYear = currentDate.getFullYear();
+        const currentMonth = currentDate.getMonth() + 1; // JavaScript months are 0-based
+        
+        const filtered = earningsData
+            .filter((item) => Number(item.year) === currentYear && Number(item.month) === currentMonth)
             .sort(sortByMonth);
-    }, [earningsData, selectedYear]);
+            
+        
+        return filtered;
+    }, [earningsData]);
 
     const previousYearEarnings = useMemo(() => {
+        const currentDate = new Date();
+        const currentYear = currentDate.getFullYear();
+        const currentMonth = currentDate.getMonth() + 1; // JavaScript months are 0-based
+        
         return earningsData
-            .filter((item) => Number(item.year) === selectedYear - 1)
+            .filter((item) => Number(item.year) === currentYear - 1 && Number(item.month) === currentMonth)
             .sort(sortByMonth);
-    }, [earningsData, selectedYear]);
+    }, [earningsData]);
 
     const paginatedEarnings = useMemo(() => {
         const startIndex = (page - 1) * itemsPerPage;
@@ -147,6 +158,7 @@ const AdminEarningsSection = ({ adminEarnings }) => {
             (sum, item) => sum + Number(item.profit || 0),
             0,
         );
+        
 
         const prevYearRevenue = previousYearEarnings.reduce(
             (sum, item) => sum + Number(item.totalRevenue || 0),
@@ -193,6 +205,7 @@ const AdminEarningsSection = ({ adminEarnings }) => {
     return (
         <div className="bg-white shadow-md rounded-lg p-6 mt-6">
             <FinancialSummaryCards
+                key={`financial-summary-${totalRevenue}-${totalExpenses}-${totalProfit}`}
                 totalRevenue={totalRevenue}
                 totalExpenses={totalExpenses}
                 totalProfit={totalProfit}

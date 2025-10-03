@@ -1,5 +1,5 @@
 import React, { useState, useEffect, Suspense } from "react";
-import { router } from "@inertiajs/react";
+import { router, usePage } from "@inertiajs/react";
 import PageHeader from "@/Components/PaymentsAndTransactions/PageHeader";
 import PaymentsList from "@/Components/PaymentsAndTransactions/PaymentsList";
 const PaymentForm = React.lazy(() => import("@/Components/forms/PaymentForm"));
@@ -37,7 +37,10 @@ const PaymentsPage = ({
     totalSalary,
     recurringTransactions,
     adminEarnings,
+    schools,
+    selectedSchoolId,
 }) => {
+    const role = usePage().props.auth.user.role;
     // Ensure users is always an array
     const safeUsers = Array.isArray(users) ? users : [];
 
@@ -50,13 +53,14 @@ const PaymentsPage = ({
         adminEarnings || [],
     );
     const [isExporting, setIsExporting] = useState(false);
+    const [selectedSchool, setSelectedSchool] = useState(selectedSchoolId || '');
 
-    // Fetch admin earnings data if not provided
+    // Update local admin earnings when adminEarnings prop changes
     useEffect(() => {
-        if (
-            !adminEarnings ||
-            (adminEarnings?.earnings && adminEarnings.earnings.length === 0)
-        ) {
+        if (adminEarnings) {
+            setLocalAdminEarnings(adminEarnings);
+        } else {
+            // Fetch admin earnings data if not provided
             axios
                 .get(route("admin.earnings.dashboard"))
                 .then((response) => {
@@ -73,14 +77,39 @@ const PaymentsPage = ({
         setActiveView(
             formType ? "form" : transaction && !formType ? "details" : "list",
         );
-    }, [formType, transaction]);
+        setSelectedSchool(selectedSchoolId || '');
+    }, [formType, transaction, selectedSchoolId]);
 
     const handleCreateNew = () => {
         router.get(route("transactions.create"));
     };
 
+    const handleSchoolFilter = (schoolId) => {
+        setSelectedSchool(schoolId);
+        const currentUrl = new URL(window.location);
+        const params = new URLSearchParams(currentUrl.search);
+        
+        if (schoolId) {
+            params.set('school_id', schoolId);
+        } else {
+            params.delete('school_id');
+        }
+        
+        // Clear page parameter when filtering
+        params.delete('page');
+        
+        router.get(route("transactions.index") + '?' + params.toString());
+    };
+
     const handleBatchPayment = () => {
         setActiveView("batch");
+        // Pass school filter to batch payment form
+        const currentUrl = new URL(window.location);
+        const params = new URLSearchParams(currentUrl.search);
+        if (selectedSchool) {
+            params.set('school_id', selectedSchool);
+        }
+        router.get(route("transactions.batch-payment-form") + '?' + params.toString());
     };
 
     const handleCancelForm = () => {
@@ -414,64 +443,106 @@ const PaymentsPage = ({
     return (
         <div className="py-4 px-2 sm:px-4 md:px-6 lg:px-8 w-full">
             <div className="w-full max-w-7xl mx-auto">
-                <PageHeader
-                    title="Gestion des paiements"
-                    description="Consultez, créez et gérez toutes vos transactions financières"
-                >
-                    {activeView !== "form" && activeView !== "batch" && (
-                        <div className="flex items-stretch justify-between gap-2 sm:gap-3 w-full flex-wrap">
-                            <div className="flex flex-col sm:flex-row flex-wrap gap-2 sm:gap-3">
-                                <button
-                                    onClick={handleCreateNew}
-                                    className="flex items-center gap-2 px-3 py-2 sm:px-4 bg-blue-600 text-white font-medium rounded-lg shadow-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors duration-200 w-full sm:w-auto"
-                                >
-                                    <Plus size={18} />
-                                    Ajouter une transaction
-                                </button>
-
-                                <button
-                                    onClick={handleBatchPayment}
-                                    className="flex items-center gap-2 px-3 py-2 sm:px-4 bg-green-600 text-white font-medium rounded-lg shadow-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 transition-colors duration-200 w-full sm:w-auto"
-                                >
-                                    <CreditCard size={18} />
-                                    Paiement groupé
-                                </button>
-
-                                <button
-                                    onClick={handleProcessRecurring}
-                                    className="flex items-center gap-2 px-3 py-2 sm:px-4 bg-purple-600 text-white font-medium rounded-lg shadow-md hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 transition-colors duration-200 w-full sm:w-auto"
-                                >
-                                    <RefreshCw size={18} />
-                                    Traiter les récurrents
-                                </button>
-                            </div>
-
-                            <div className="flex items-center">
-                                <button
-                                    onClick={handleDownloadStats}
-                                    disabled={isExporting}
-                                    className={`flex items-center gap-2 px-3 py-2 sm:px-4 bg-white text-gray-700 font-medium rounded-lg border border-gray-300 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-300 focus:ring-offset-2 transition-colors duration-200 w-full sm:w-auto ${isExporting ? "opacity-70 cursor-not-allowed" : ""}`}
-                                >
-                                    {isExporting ? (
-                                        <Loader2 size={18} className="animate-spin" />
-                                    ) : (
-                                        <Download size={18} />
-                                    )}
-                                    <span className="hidden sm:inline">Exporter</span>
-                                    <span className="sm:hidden">Export</span>
-                                </button>
-                            </div>
-                        </div>
-                    )}
-                    {(activeView === "form" || activeView === "batch") && (
-                        <button
-                            onClick={handleCancelForm}
-                            className="px-3 py-2 sm:px-4 bg-gray-500 text-white rounded-md hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-400 w-full sm:w-auto"
+            <PageHeader
+    title="Gestion des paiements"
+    description="Consultez, créez et gérez toutes vos transactions financières"
+>
+    {activeView !== "form" && activeView !== "batch" && (
+        <div className="flex flex-col gap-4 w-full">
+            {/* Toolbar with filter + actions in one line */}
+            <div className="flex flex-wrap items-center justify-between gap-3 w-full">
+                
+                {/* Left: School filter */}
+                {role === "admin" && schools && schools.length > 0 && (
+                    <div className="flex items-center gap-2">
+                        <select
+                            id="school-filter"
+                            value={selectedSchool}
+                            onChange={(e) => handleSchoolFilter(e.target.value)}
+                            className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-w-[200px] text-sm"
                         >
-                            Annuler
-                        </button>
+                            <option value="">Toutes les écoles</option>
+                            {schools.map((school) => (
+                                <option key={school.id} value={school.id}>
+                                    {school.name}
+                                </option>
+                            ))}
+                        </select>
+                        {selectedSchool && (
+                            <button
+                                onClick={() => handleSchoolFilter("")}
+                                className="px-2 py-1 text-sm text-gray-600 hover:text-red-500"
+                            >
+                                ✕
+                            </button>
+                        )}
+                    </div>
+                )}
+
+                {/* Right: Action buttons */}
+                <div className="flex flex-wrap gap-2">
+                    <button
+                        onClick={handleCreateNew}
+                        className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white font-medium rounded-lg shadow hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
+                    >
+                        <Plus size={18} />
+                        Ajouter
+                    </button>
+
+                    {role === "admin" && (
+                        <>
+                            <button
+                                onClick={handleBatchPayment}
+                                className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white font-medium rounded-lg shadow hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 transition"
+                            >
+                                <CreditCard size={18} />
+                                Groupé
+                            </button>
+
+                            <button
+                                onClick={handleProcessRecurring}
+                                className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white font-medium rounded-lg shadow hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500 transition"
+                            >
+                                <RefreshCw size={18} />
+                                Récurrents
+                            </button>
+                        </>
                     )}
-                </PageHeader>
+
+                    <button
+                        onClick={handleDownloadStats}
+                        disabled={isExporting}
+                        className={`flex items-center gap-2 px-4 py-2 bg-white text-gray-700 font-medium rounded-lg border shadow hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-300 transition ${
+                            isExporting ? "opacity-70 cursor-not-allowed" : ""
+                        }`}
+                    >
+                        {isExporting ? (
+                            <Loader2 size={18} className="animate-spin" />
+                        ) : (
+                            <Download size={18} />
+                        )}
+                        <span>Exporter</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    )}
+
+    {/* Cancel button when in form/batch view */}
+    {(activeView === "form" || activeView === "batch") && (
+        <div className="mt-4">
+            <button
+                onClick={handleCancelForm}
+                className="flex items-center gap-2 px-4 py-2 bg-gray-500 text-white rounded-lg shadow hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-400 transition"
+            >
+                Annuler
+            </button>
+        </div>
+    )}
+</PageHeader>
+
+
+
                 {flash?.success && (
                     <Alert
                         type="success"
@@ -491,6 +562,8 @@ const PaymentsPage = ({
                                 onMakePayment={handleMakePayment}
                                 onEditEmployee={handleEditEmployee}
                                 adminEarnings={localAdminEarnings}
+                                selectedSchoolId={selectedSchool}
+                                schools={schools}
                             />
                         )}
                         {activeView === "form" && (
@@ -542,7 +615,10 @@ const PaymentsPage = ({
                 </div>
                 <Pagination links={transactions.links} />
                 {localAdminEarnings && (
-                    <AdminEarningsSection adminEarnings={localAdminEarnings} />
+                    <AdminEarningsSection 
+                        key={`admin-earnings-${selectedSchool}`}
+                        adminEarnings={localAdminEarnings} 
+                    />
                 )}
             </div>
         </div>

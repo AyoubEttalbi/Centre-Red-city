@@ -42,13 +42,13 @@ class CanViewTeacherProfile
             return $next($request);
         }
 
-        // For index routes, allow teachers to access their own listing
-        if ($routeName === 'teachers.index' && $user && $user->role === 'teacher') {
+        // For index routes, allow teachers and assistants
+        if ($routeName === 'teachers.index' && $user && in_array($user->role, ['teacher','assistant'])) {
             return $next($request);
         }
 
-        // For show routes, allow teachers to access their own profile
-        if ($routeName === 'teachers.show' && $user && $user->role === 'teacher') {
+        // For show routes, allow teachers to access their own profile and allow assistants
+        if ($routeName === 'teachers.show' && $user && in_array($user->role, ['teacher','assistant'])) {
             // Use the user's email to find the teacher
             $teacher = Teacher::where('email', $user->email)->first();
             
@@ -58,11 +58,21 @@ class CanViewTeacherProfile
                 'email_used' => $user->email
             ]);
             
-            if ($teacher) {
+            // If user is a teacher, allow if teacher exists (simplified)
+            if ($user->role === 'teacher' && $teacher) {
                 // Allow access if teacher exists (simplified logic - no ID matching needed)
                 Log::info('CanViewTeacherProfile: Teacher access granted (simplified)', [
                     'user_id' => $user->id,
                     'teacher_id' => $teacher->id,
+                    'is_mobile' => strpos($request->header('User-Agent'), 'Mobile') !== false
+                ]);
+                return $next($request);
+            }
+
+            // Assistants: allow viewing teacher profiles (filtering handled elsewhere if needed)
+            if ($user->role === 'assistant') {
+                Log::info('CanViewTeacherProfile: Assistant access granted', [
+                    'user_id' => $user->id,
                     'is_mobile' => strpos($request->header('User-Agent'), 'Mobile') !== false
                 ]);
                 return $next($request);

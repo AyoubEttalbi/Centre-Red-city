@@ -8,9 +8,12 @@ use App\Models\School;
 use App\Models\Student;
 use App\Models\Teacher;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Inertia\Inertia;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\Rule;
+use Illuminate\Support\Facades\Validator;
 class ClassesController extends Controller
 {
     /**
@@ -180,19 +183,56 @@ class ClassesController extends Controller
      */
     public function store(Request $request)
     {
-        // Validate the request data
-        $validatedData = $request->validate([
-            'name' => 'required|string|max:255|unique:classes,name',
+        Log::info('ClassesController@store called', [
+            'payload' => $request->all()
+        ]);
+
+        $rules = [
+            'name' => [
+                'required',
+                'string',
+                'max:255',
+                Rule::unique('classes', 'name')->where(function ($query) use ($request) {
+                    return $query->where('school_id', $request->school_id);
+                }),
+            ],
             'level_id' => 'required|exists:levels,id',
             'school_id' => 'required|exists:schools,id',
             'number_of_students' => 'nullable|integer|min:0',
+        ];
+
+        $messages = [
+            'name.required' => 'Le nom de la classe est obligatoire.',
+            'name.unique' => 'Une classe avec ce nom existe déjà dans cette école.',
+            'name.string' => 'Le nom de la classe doit être une chaîne de caractères.',
+            'name.max' => 'Le nom de la classe ne peut pas dépasser 255 caractères.',
+            'level_id.required' => 'Le niveau est obligatoire.',
+            'level_id.exists' => 'Le niveau sélectionné est invalide.',
+            'school_id.required' => 'L\'école est obligatoire.',
+            'school_id.exists' => 'L\'école sélectionnée est invalide.',
+            'number_of_students.integer' => 'Le nombre d\'élèves doit être un entier.',
+            'number_of_students.min' => 'Le nombre d\'élèves doit être au moins 0.',
+        ];
+
+        $validator = Validator::make($request->all(), $rules, $messages);
+        if ($validator->fails()) {
+            Log::warning('ClassesController@store validation failed', [
+                'errors' => $validator->errors()->toArray()
+            ]);
+            return back()->withErrors($validator)->withInput();
+        }
+
+        $validatedData = $validator->validated();
+
+        $class = Classes::create($validatedData);
+
+        Log::info('ClassesController@store created class', [
+            'class_id' => $class->id,
+            'class_name' => $class->name,
+            'school_id' => $class->school_id
         ]);
 
-        // Create a new class
-        Classes::create($validatedData);
-
-        // Redirect to the classes index page with a success message
-        return redirect()->route('classes.index')->with('success', 'Class created successfully.');
+        return redirect()->route('classes.index')->with('success', 'Classe créée avec succès.');
     }
 
     /**
@@ -331,13 +371,51 @@ class ClassesController extends Controller
      */
     public function update(Request $request, Classes $class)
     {
-        // Validate the request data
-        $validatedData = $request->validate([
-            'name' => 'required|string|max:255|unique:classes,name,' . $class->id,
+        Log::info('ClassesController@update called', [
+            'class_id' => $class->id,
+            'payload' => $request->all()
+        ]);
+
+        $rules = [
+            'name' => [
+                'required',
+                'string',
+                'max:255',
+                Rule::unique('classes', 'name')
+                    ->ignore($class->id)
+                    ->where(function ($query) use ($request, $class) {
+                        $schoolId = $request->school_id ?? $class->school_id;
+                        return $query->where('school_id', $schoolId);
+                    }),
+            ],
             'level_id' => 'required|exists:levels,id',
             'school_id' => 'required|exists:schools,id',
             'number_of_students' => 'nullable|integer|min:0',
-        ]);
+        ];
+
+        $messages = [
+            'name.required' => 'Le nom de la classe est obligatoire.',
+            'name.unique' => 'Une classe avec ce nom existe déjà dans cette école.',
+            'name.string' => 'Le nom de la classe doit être une chaîne de caractères.',
+            'name.max' => 'Le nom de la classe ne peut pas dépasser 255 caractères.',
+            'level_id.required' => 'Le niveau est obligatoire.',
+            'level_id.exists' => 'Le niveau sélectionné est invalide.',
+            'school_id.required' => 'L\'école est obligatoire.',
+            'school_id.exists' => 'L\'école sélectionnée est invalide.',
+            'number_of_students.integer' => 'Le nombre d\'élèves doit être un entier.',
+            'number_of_students.min' => 'Le nombre d\'élèves doit être au moins 0.',
+        ];
+
+        $validator = Validator::make($request->all(), $rules, $messages);
+        if ($validator->fails()) {
+            Log::warning('ClassesController@update validation failed', [
+                'class_id' => $class->id,
+                'errors' => $validator->errors()->toArray()
+            ]);
+            return back()->withErrors($validator)->withInput();
+        }
+
+        $validatedData = $validator->validated();
 
         // Remove number_of_teachers from the data to update
         unset($validatedData['number_of_teachers']);
@@ -345,8 +423,13 @@ class ClassesController extends Controller
         // Update the class
         $class->update($validatedData);
 
-        // Redirect to the classes index page with a success message
-        return redirect()->route('classes.index')->with('success', 'Class updated successfully.');
+        Log::info('ClassesController@update updated class', [
+            'class_id' => $class->id,
+            'class_name' => $class->name,
+            'school_id' => $class->school_id
+        ]);
+
+        return redirect()->route('classes.index')->with('success', 'Classe mise à jour avec succès.');
     }
 
     /**
@@ -413,10 +496,26 @@ class ClassesController extends Controller
      */
     public function listJson(Request $request)
     {
+        $authUser = Auth::user();
+        $isAssistant = $authUser && $authUser->role === 'assistant' && $authUser->assistant;
+        
         $query = Classes::query();
+        
         if ($request->has('school_id')) {
             $query->where('school_id', $request->school_id);
         }
+        
+        // Filter by assistant's schools if user is assistant
+        if ($isAssistant) {
+            $selectedSchoolId = session('school_id');
+            if ($selectedSchoolId) {
+                $assistantSchoolIds = [$selectedSchoolId];
+            } else {
+                $assistantSchoolIds = $authUser->assistant->schools()->pluck('schools.id')->toArray();
+            }
+            $query->whereIn('school_id', $assistantSchoolIds);
+        }
+        
         $classes = $query->get(['id', 'name']);
         return response()->json($classes);
     }

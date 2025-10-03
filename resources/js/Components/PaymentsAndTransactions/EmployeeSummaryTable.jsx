@@ -71,6 +71,7 @@ const EmployeeSummaryTable = ({
     onEdit,
     onView,
     onMakePayment,
+    selectedSchoolId,
 }) => {
     const [selectedMonth, setSelectedMonth] = useState(null);
     const [selectedYear, setSelectedYear] = useState(null);
@@ -128,13 +129,18 @@ const EmployeeSummaryTable = ({
     useEffect(() => {
         if (selectedMonth !== null && selectedYear !== null) {
             setLoadingStats(true);
+            const params = {
+                month: selectedMonth + 1, // Convert from 0-11 to 1-12
+                year: selectedYear
+            };
+            
+            // Add school filter if provided
+            if (selectedSchoolId) {
+                params.school_id = selectedSchoolId;
+            }
+            
             axios
-                .get(route("admin.filtered.monthly.stats"), {
-                    params: {
-                        month: selectedMonth + 1, // Convert from 0-11 to 1-12
-                        year: selectedYear
-                    }
-                })
+                .get(route("admin.filtered.monthly.stats"), { params })
                 .then((response) => {
                     if (response.data.success) {
                         setFilteredStats(response.data);
@@ -147,7 +153,7 @@ const EmployeeSummaryTable = ({
                     setLoadingStats(false);
                 });
         }
-    }, [selectedMonth, selectedYear]);
+    }, [selectedMonth, selectedYear, selectedSchoolId]);
 
     // Fetch filtered employee data when month/year changes
     useEffect(() => {

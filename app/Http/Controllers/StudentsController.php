@@ -541,7 +541,39 @@ protected function transformStudentData($student)
         $levels = Level::all();
         // Fetch offers based on student's level
         $offers = Offer::where('levelId', $student->levelId)->get();
-        $teachers = Teacher::with('subjects')->get(); // Eager load subjects for each teacher
+        // Fetch teachers, filtered by assistant's schools when applicable
+        $authUser = auth()->user();
+        $isAssistant = $authUser && $authUser->role === 'assistant' && $authUser->assistant;
+        if ($isAssistant) {
+            $selectedSchoolId = session('school_id');
+            if ($selectedSchoolId) {
+                $assistantSchoolIds = [$selectedSchoolId];
+            } else {
+                $assistantSchoolIds = $authUser->assistant->schools()->pluck('schools.id')->toArray();
+            }
+            // Collect teacher IDs via classes in these schools
+            $teacherIdsByClasses = DB::table('classes_teacher')
+                ->join('classes', 'classes_teacher.classes_id', '=', 'classes.id')
+                ->whereIn('classes.school_id', $assistantSchoolIds)
+                ->pluck('classes_teacher.teacher_id')
+                ->toArray();
+            // Collect teacher IDs via direct school_teacher pivot (if used)
+            $teacherIdsBySchools = DB::table('school_teacher')
+                ->whereIn('school_id', $assistantSchoolIds)
+                ->pluck('teacher_id')
+                ->toArray();
+            $allowedTeacherIds = array_values(array_unique(array_merge($teacherIdsByClasses, $teacherIdsBySchools)));
+            $teachers = \App\Models\Teacher::with('subjects')
+                ->when(!empty($allowedTeacherIds), function($q) use ($allowedTeacherIds) {
+                    $q->whereIn('id', $allowedTeacherIds);
+                }, function($q) {
+                    // If no mapping found, return empty list for assistants to avoid leakage
+                    $q->whereRaw('1=0');
+                })
+                ->get();
+        } else {
+            $teachers = Teacher::with('subjects')->get(); // Eager load subjects for each teacher
+        }
 
         // Fetch memberships for the student (including soft-deleted ones)
         $memberships = Membership::withTrashed()

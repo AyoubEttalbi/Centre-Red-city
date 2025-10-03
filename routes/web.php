@@ -177,12 +177,26 @@ Route::middleware('auth')->group(function () {
     // Mark all announcements as read
     Route::post('/announcements/mark-all-read', [AnnouncementController::class, 'markAllRead'])->name('announcements.markAllRead');
     
+    // Allow assistants to access transactions index/create/store/show
+    Route::middleware('auth')->group(function () {
+        Route::get('/transactions', [TransactionController::class, 'index'])->name('transactions.index');
+        
+        Route::get('/transactions/create', [TransactionController::class, 'create'])->name('transactions.create');
+        Route::post('/transactions', [TransactionController::class, 'store'])->name('transactions.store');
+        Route::get('/transactions/{transaction}', [TransactionController::class, 'show'])->name('transactions.show');
+
+        // Also allow assistants to edit/update/destroy
+        Route::get('/transactions/{transaction}/edit', [TransactionController::class, 'edit'])->name('transactions.edit');
+        Route::put('/transactions/{transaction}', [TransactionController::class, 'update'])->name('transactions.update');
+        Route::delete('/transactions/{transaction}', [TransactionController::class, 'destroy'])->name('transactions.destroy');
+    });
+
     // ADMIN ONLY routes based on Menu.jsx
     Route::middleware(AdminMiddleware::class)->group(function () {
         // Admin-only index routes based on Menu.jsx visibility
         Route::get('/assistants', [AssistantController::class, 'index'])->name('assistants.index');
         Route::get('/offers', [OfferController::class, 'index'])->name('offers.index');
-        Route::get('/transactions', [TransactionController::class, 'index'])->name('transactions.index');
+        // transactions.index accessible to assistants via auth group above
         Route::get('/announcements', [AnnouncementController::class, 'index'])->name('announcements.index');
         Route::get('/othersettings', [LevelController::class, 'index'])->name('othersettings.index');
         
@@ -200,7 +214,8 @@ Route::middleware('auth')->group(function () {
         // Admin resource methods (create, store, update, destroy)
         Route::resource('assistants', AssistantController::class, ['except' => ['show', 'index']]);
         Route::resource('offers', OfferController::class, ['except' => ['index']]);
-        Route::resource('transactions', TransactionController::class, ['except' => ['index']]);
+        // Keep admin-only for other admin-specific operations; assistant routes are defined above
+        Route::resource('transactions', TransactionController::class, ['except' => ['index','create','store','show','edit','update','destroy']]);
         Route::resource('announcements', AnnouncementController::class, ['except' => ['index']]);
         
         // Transaction routes - admin only

@@ -44,10 +44,80 @@ private function formatMonthInFrench($month)
  *
  * @return array
  */
-private function getCommonData()
+private function getCommonData($schoolFilterId = null)
 {
+    $authUser = Auth::user();
+    $isAssistant = $authUser && $authUser->role === 'assistant' && $authUser->assistant;
+    $schoolIds = [];
+    if ($isAssistant) {
+        $selectedSchoolId = session('school_id');
+        if ($selectedSchoolId) {
+            $schoolIds = [$selectedSchoolId];
+        } else {
+            $schoolIds = $authUser->assistant->schools()->pluck('schools.id')->toArray();
+        }
+    }
+
     // Get all users with their id, name, email, and role
-    $users = User::with(['teacher', 'assistant'])->get();
+    $usersQuery = User::with(['teacher', 'assistant']);
+    $teacherUserIds = [];
+    $assistantUserIds = [];
+    if ($isAssistant && !empty($schoolIds)) {
+        // Teachers assigned to assistant schools via classes
+        $teacherUserIdsFromClasses = DB::table('classes_teacher')
+            ->join('classes', 'classes_teacher.classes_id', '=', 'classes.id')
+            ->join('teachers', 'classes_teacher.teacher_id', '=', 'teachers.id')
+            ->join('users', 'users.email', '=', 'teachers.email')
+            ->whereIn('classes.school_id', $schoolIds)
+            ->distinct()
+            ->pluck('users.id')
+            ->toArray();
+            
+        // Teachers directly assigned to assistant schools via school_teacher
+        $teacherUserIdsFromSchools = DB::table('school_teacher')
+            ->join('teachers', 'school_teacher.teacher_id', '=', 'teachers.id')
+            ->join('users', 'users.email', '=', 'teachers.email')
+            ->whereIn('school_teacher.school_id', $schoolIds)
+            ->distinct()
+            ->pluck('users.id')
+            ->toArray();
+            
+        // Assistants in assistant schools via assistant_school
+        $assistantUserIds = DB::table('assistant_school')
+            ->join('assistants', 'assistant_school.assistant_id', '=', 'assistants.id')
+            ->join('users', 'users.email', '=', 'assistants.email')
+            ->whereIn('assistant_school.school_id', $schoolIds)
+            ->distinct()
+            ->pluck('users.id')
+            ->toArray();
+            
+        $allowedUserIds = array_values(array_unique(array_merge(
+            $teacherUserIdsFromClasses, 
+            $teacherUserIdsFromSchools, 
+            $assistantUserIds
+        )));
+        
+        Log::info('Assistant user filtering (school-specific)', [
+            'assistant_id' => $authUser->id,
+            'school_ids' => $schoolIds,
+            'teacher_user_ids_from_classes' => $teacherUserIdsFromClasses,
+            'teacher_user_ids_from_schools' => $teacherUserIdsFromSchools,
+            'assistant_user_ids' => $assistantUserIds,
+            'allowed_user_ids' => $allowedUserIds
+        ]);
+        
+        $usersQuery->whereIn('id', $allowedUserIds);
+    }
+    // For non-assistants, include all users
+    // For assistants, only include users from their schools
+    $users = $usersQuery->get();
+    
+    // Log final users count for debugging
+    Log::info('Final users count', [
+        'total_users' => $users->count(),
+        'is_assistant' => $isAssistant,
+        'users_by_role' => $users->groupBy('role')->map->count()
+    ]);
     
     // Fetch wallet value for teachers and salary for assistants
     $usersWithDetails = $users->map(function ($user) {
@@ -68,16 +138,51 @@ private function getCommonData()
     $totalSalary = $usersWithDetails->where('role', 'assistant')->sum('salary') ?? 0;
     
     // Get transactions with their associated user
-    $transactions = Transaction::with('user')
-        ->orderBy('payment_date', 'desc')
-        ->simplePaginate(20000);
+    $transactionsQuery = Transaction::with('user')
+        ->orderBy('payment_date', 'desc');
     
-    // Calculate admin earnings for the current and previous year
-    $adminEarnings = $this->calculateAdminEarningsForComparison();
+    // Apply school filtering for admin users
+    if ($authUser && $authUser->role === 'admin' && $schoolFilterId) {
+        $schoolUserIds = $this->getSchoolUserIds($schoolFilterId);
+        if (!empty($schoolUserIds)) {
+            $transactionsQuery->whereIn('user_id', $schoolUserIds);
+        } else {
+            $transactionsQuery->whereRaw('1=0');
+        }
+    } elseif ($isAssistant && !empty($schoolIds)) {
+        // Filter transactions to those involving allowed users (teachers and assistants) in assistant schools
+        $allowedUserIds = $users->pluck('id')->toArray();
+        if (!empty($allowedUserIds)) {
+            $transactionsQuery->whereIn('user_id', $allowedUserIds);
+        } else {
+            $transactionsQuery->whereRaw('1=0');
+        }
+    }
+    $transactions = $transactionsQuery->simplePaginate(20000);
     
-    // Get all available years for the filter dropdown
-    $availableYears = $this->getAvailableYears();
+    // Calculate earnings for dashboard (filtered for assistants or school filter)
+    $earningsSchoolIds = $schoolIds;
+    if ($authUser && $authUser->role === 'admin' && $schoolFilterId) {
+        $earningsSchoolIds = [$schoolFilterId];
+    }
+    $earnings = $this->calculateAdminEarningsPerMonthFiltered($earningsSchoolIds);
     
+    Log::info('getCommonData earnings calculation', [
+        'schoolFilterId' => $schoolFilterId,
+        'earningsSchoolIds' => $earningsSchoolIds,
+        'earnings_count' => count($earnings),
+        'current_month_earnings' => collect($earnings)->where('year', now()->year)->where('month', now()->month)->first()
+    ]);
+    
+    // Get all available years for the filter dropdown (filtered for assistants or school filter)
+    $availableYears = $this->getAvailableYearsFiltered($earningsSchoolIds);
+    
+    // Get all schools for admin users
+    $schools = [];
+    if ($authUser && $authUser->role === 'admin') {
+        $schools = \App\Models\School::select('id', 'name')->orderBy('name')->get();
+    }
+
     return [
         'users' => $usersWithDetails->toArray(),
         'transactions' => $transactions,
@@ -85,11 +190,70 @@ private function getCommonData()
         'assistantCount' => $assistantCount,
         'totalWallet' => $totalWallet,
         'totalSalary' => $totalSalary,
-        'adminEarnings' => $adminEarnings,
-        'availableYears' => $availableYears
+        'adminEarnings' => [
+            'earnings' => $earnings,
+            'availableYears' => $availableYears,
+        ],
+        'availableYears' => $availableYears,
+        'schools' => $schools
     ];
 }
 
+/**
+ * Get user IDs associated with a specific school
+ * 
+ * @param int $schoolId
+ * @return array
+ */
+private function getSchoolUserIds($schoolId)
+{
+    Log::info('Getting school user IDs for school:', ['school_id' => $schoolId]);
+    
+    // Get teachers associated with the school via school_teacher table
+    $teacherUserIds = DB::table('school_teacher')
+        ->join('teachers', 'school_teacher.teacher_id', '=', 'teachers.id')
+        ->join('users', 'users.email', '=', 'teachers.email')
+        ->where('school_teacher.school_id', $schoolId)
+        ->distinct()
+        ->pluck('users.id')
+        ->toArray();
+
+    // Get teachers associated with the school via classes
+    $teacherUserIdsFromClasses = DB::table('classes_teacher')
+        ->join('classes', 'classes_teacher.classes_id', '=', 'classes.id')
+        ->join('teachers', 'classes_teacher.teacher_id', '=', 'teachers.id')
+        ->join('users', 'users.email', '=', 'teachers.email')
+        ->where('classes.school_id', $schoolId)
+        ->distinct()
+        ->pluck('users.id')
+        ->toArray();
+
+    // Get assistants associated with the school
+    $assistantUserIds = DB::table('assistant_school')
+        ->join('assistants', 'assistant_school.assistant_id', '=', 'assistants.id')
+        ->join('users', 'users.email', '=', 'assistants.email')
+        ->where('assistant_school.school_id', $schoolId)
+        ->distinct()
+        ->pluck('users.id')
+        ->toArray();
+
+    // Combine all user IDs and remove duplicates
+    $allUserIds = array_values(array_unique(array_merge(
+        $teacherUserIds,
+        $teacherUserIdsFromClasses,
+        $assistantUserIds
+    )));
+    
+    Log::info('School user IDs result:', [
+        'school_id' => $schoolId,
+        'teacher_user_ids' => $teacherUserIds,
+        'teacher_user_ids_from_classes' => $teacherUserIdsFromClasses,
+        'assistant_user_ids' => $assistantUserIds,
+        'all_user_ids' => $allUserIds
+    ]);
+    
+    return $allUserIds;
+}
 
 /**
  * Get all available years from the database
@@ -122,6 +286,33 @@ private function getAvailableYears()
 }
 
 /**
+ * Get available years filtered by assistant schools
+ */
+private function getAvailableYearsFiltered(array $schoolIds = [])
+{
+    if (empty($schoolIds)) {
+        return $this->getAvailableYears();
+    }
+    try {
+        $years = DB::table('invoices')
+            ->join('students', 'students.id', '=', 'invoices.student_id')
+            ->whereIn('students.schoolId', $schoolIds)
+            ->whereNull('invoices.deleted_at')
+            ->select(DB::raw('DISTINCT YEAR(invoices.billDate) as year'))
+            ->orderBy('year', 'desc')
+            ->pluck('year')
+            ->toArray();
+        $years = array_map('intval', $years);
+        if (empty($years)) {
+            $years = [now()->year];
+        }
+        return $years;
+    } catch (\Exception $e) {
+        return [now()->year];
+    }
+}
+
+/**
  * Check if a table exists in the database
  *
  * @param string $tableName
@@ -149,7 +340,7 @@ private function tableExists($tableName)
  *
  * @return array
  */
-private function calculateAdminEarningsPerMonth()
+private function calculateAdminEarningsPerMonth(array $schoolIds = [])
 {
     // Enable query logging for debugging
     DB::enableQueryLog();
@@ -158,7 +349,7 @@ private function calculateAdminEarningsPerMonth()
     $startDate = now()->subMonths(11)->startOfMonth();
     
     // Get monthly invoice earnings
-    $monthlyEarnings = $this->getMonthlyInvoiceEarnings($startDate);
+    $monthlyEarnings = $this->getMonthlyInvoiceEarnings($startDate, $schoolIds);
     
     // Initialize array for all months (including months with zero earnings)
     $allMonths = $this->initializeAllMonths();
@@ -166,8 +357,8 @@ private function calculateAdminEarningsPerMonth()
     // Fill in actual earnings data
     $allMonths = $this->fillMonthlyEarnings($allMonths, $monthlyEarnings);
     
-    // Process earnings with additional metrics
-    $processedEarnings = $this->processMonthlyEarnings($allMonths, $monthlyEarnings);
+    // Process earnings with additional metrics (apply school filter to expenses)
+    $processedEarnings = $this->processMonthlyEarnings($allMonths, $monthlyEarnings, $schoolIds);
     
     // Sort by year and month (descending)
     usort($processedEarnings, function ($a, $b) {
@@ -181,19 +372,34 @@ private function calculateAdminEarningsPerMonth()
 }
 
 /**
+ * Wrapper to compute earnings filtered (assistant) or unfiltered (admin)
+ */
+private function calculateAdminEarningsPerMonthFiltered(array $schoolIds = [])
+{
+    if (empty($schoolIds)) {
+        return $this->calculateAdminEarningsPerMonth();
+    }
+    return $this->calculateAdminEarningsPerMonth($schoolIds);
+}
+
+/**
  * Get monthly invoice earnings
  *
  * @param \Carbon\Carbon $startDate
  * @return \Illuminate\Support\Collection
  */
-private function getMonthlyInvoiceEarnings($startDate)
+private function getMonthlyInvoiceEarnings($startDate, array $schoolIds = [])
 {
     try {
-        // Get all invoices
-        $allInvoices = DB::table('invoices')
-            ->select('id', 'billDate', 'amountPaid')
-            ->whereNull('deleted_at')
-            ->get();
+        // Get all invoices (optionally filtered by schools)
+        $invoicesQuery = DB::table('invoices')
+            ->select('invoices.id', 'invoices.billDate', 'invoices.amountPaid')
+            ->whereNull('invoices.deleted_at');
+        if (!empty($schoolIds)) {
+            $invoicesQuery->join('students', 'students.id', '=', 'invoices.student_id')
+                ->whereIn('students.schoolId', $schoolIds);
+        }
+        $allInvoices = $invoicesQuery->get();
         
         // Group earnings by year and month
         $groupedEarnings = $this->groupInvoicesByMonth($allInvoices);
@@ -290,7 +496,7 @@ private function fillMonthlyEarnings($allMonths, $monthlyEarnings)
  * @param \Illuminate\Support\Collection $monthlyEarnings
  * @return array
  */
-private function processMonthlyEarnings($allMonths, $monthlyEarnings)
+private function processMonthlyEarnings($allMonths, $monthlyEarnings, array $schoolIds = [])
 {
     $processedEarnings = [];
     
@@ -304,8 +510,8 @@ private function processMonthlyEarnings($allMonths, $monthlyEarnings)
         // Get monthly enrollment revenue
         $monthlyEnrollmentRevenue = $this->getMonthlyEnrollmentRevenue($data['year'], $data['month']);
         
-        // Get monthly expenses
-        $monthlyExpenses = $this->getMonthlyExpenses($data['year'], $data['month']);
+        // Get monthly expenses (filtered by assistant schools if provided)
+        $monthlyExpenses = $this->getMonthlyExpenses($data['year'], $data['month'], $schoolIds);
         
         // Calculate totals
         $totalRevenue = $invoiceRevenue + (float)$monthlyEnrollmentRevenue;
@@ -373,26 +579,101 @@ private function getMonthlyEnrollmentRevenue($year, $month)
  * @param int $month
  * @return float
  */
-private function getMonthlyExpenses($year, $month)
+private function getMonthlyExpenses($year, $month, array $schoolIds = [])
 {
     $monthlyExpenses = 0;
     
+    Log::info('getMonthlyExpenses called', [
+        'year' => $year,
+        'month' => $month,
+        'schoolIds' => $schoolIds
+    ]);
+    
     try {
-        $monthlyExpenses = DB::table('transactions')
+        $query = DB::table('transactions')
             ->where(function ($query) {
                 $query->where('type', 'salary')
                       ->orWhere('type', 'payment')
                       ->orWhere('type', 'expense');
             })
             ->whereRaw('YEAR(payment_date) = ?', [$year])
-            ->whereRaw('MONTH(payment_date) = ?', [$month])
-            ->sum(DB::raw('CAST(amount AS DECIMAL(10,2))'));
+            ->whereRaw('MONTH(payment_date) = ?', [$month]);
+        if (!empty($schoolIds)) {
+            $allowedUserIds = $this->getAllowedUserIdsForSchools($schoolIds);
+            Log::info('getMonthlyExpenses - allowed user IDs', [
+                'schoolIds' => $schoolIds,
+                'allowedUserIds' => $allowedUserIds
+            ]);
+            if (!empty($allowedUserIds)) {
+                $query->whereIn('user_id', $allowedUserIds);
+            } else {
+                Log::info('getMonthlyExpenses - no allowed user IDs, returning 0');
+                return 0.0;
+            }
+        }
+        $monthlyExpenses = $query->sum(DB::raw('CAST(amount AS DECIMAL(10,2))'));
+        Log::info('getMonthlyExpenses result', [
+            'year' => $year,
+            'month' => $month,
+            'schoolIds' => $schoolIds,
+            'monthlyExpenses' => $monthlyExpenses
+        ]);
     } catch (\Exception $e) {
+        Log::error('getMonthlyExpenses error', [
+            'error' => $e->getMessage(),
+            'year' => $year,
+            'month' => $month,
+            'schoolIds' => $schoolIds
+        ]);
         $monthlyExpenses = 0;
     }
     
     return $monthlyExpenses;
 }
+
+    /**
+     * Resolve allowed user ids (teachers and assistants) for given school ids
+     */
+    private function getAllowedUserIdsForSchools(array $schoolIds): array
+    {
+        if (empty($schoolIds)) {
+            return [];
+        }
+        
+        // Teachers via school_teacher table
+        $teacherUserIdsFromSchools = DB::table('school_teacher')
+            ->join('teachers', 'school_teacher.teacher_id', '=', 'teachers.id')
+            ->join('users', 'users.email', '=', 'teachers.email')
+            ->whereIn('school_teacher.school_id', $schoolIds)
+            ->distinct()
+            ->pluck('users.id')
+            ->toArray();
+            
+        // Teachers via classes in schools
+        $teacherUserIdsFromClasses = DB::table('classes_teacher')
+            ->join('classes', 'classes_teacher.classes_id', '=', 'classes.id')
+            ->join('teachers', 'classes_teacher.teacher_id', '=', 'teachers.id')
+            ->join('users', 'users.email', '=', 'teachers.email')
+            ->whereIn('classes.school_id', $schoolIds)
+            ->distinct()
+            ->pluck('users.id')
+            ->toArray();
+
+        // Assistants via assistant_school
+        $assistantUserIds = DB::table('assistant_school')
+            ->join('assistants', 'assistant_school.assistant_id', '=', 'assistants.id')
+            ->join('users', 'users.email', '=', 'assistants.email')
+            ->whereIn('assistant_school.school_id', $schoolIds)
+            ->distinct()
+            ->pluck('users.id')
+            ->toArray();
+
+        return array_values(array_unique(array_merge(
+            $teacherUserIdsFromSchools,
+            $teacherUserIdsFromClasses,
+            $assistantUserIds
+        )));
+    }
 
 /**
  * Get admin earnings data for the dashboard
@@ -770,16 +1051,46 @@ public function index(Request $request)
 {
     // Get filter parameters
     $year = $request->query('year', now()->year);
+    $schoolId = $request->query('school_id');
+    
+    // Debug logging
+    Log::info('TransactionController index', [
+        'year' => $year,
+        'school_id' => $schoolId,
+        'all_params' => $request->all()
+    ]);
     
     // Get all transactions, with latest first
-    $transactions = Transaction::with('user')
+    $transactionsQuery = Transaction::with('user')
         ->whereRaw('YEAR(payment_date) = ?', [$year])
-        ->orderBy('payment_date', 'desc')
-        ->paginate(10);
+        ->orderBy('payment_date', 'desc');
+
+    // Apply school filter for admin users
+    $authUser = Auth::user();
+    if ($authUser && $authUser->role === 'admin' && $schoolId) {
+        // Filter transactions by users associated with the selected school
+        $schoolUserIds = $this->getSchoolUserIds($schoolId);
+        if (!empty($schoolUserIds)) {
+            $transactionsQuery->whereIn('user_id', $schoolUserIds);
+        } else {
+            // If no users found for the school, return empty result
+            $transactionsQuery->whereRaw('1=0');
+        }
+    }
+
+    $transactions = $transactionsQuery->paginate(10);
 
     // Calculate total amount for the filtered transactions
-    $totalAmount = Transaction::whereRaw('YEAR(payment_date) = ?', [$year])
-        ->sum('amount');
+    $totalAmountQuery = Transaction::whereRaw('YEAR(payment_date) = ?', [$year]);
+    if ($authUser && $authUser->role === 'admin' && $schoolId) {
+        $schoolUserIds = $this->getSchoolUserIds($schoolId);
+        if (!empty($schoolUserIds)) {
+            $totalAmountQuery->whereIn('user_id', $schoolUserIds);
+        } else {
+            $totalAmountQuery->whereRaw('1=0');
+        }
+    }
+    $totalAmount = $totalAmountQuery->sum('amount');
 
     // Get all available years for the filter
     $availableYears = DB::table('transactions')
@@ -788,9 +1099,11 @@ public function index(Request $request)
         ->pluck('year')
         ->toArray();
 
-    $data = $this->getCommonData();
+    $data = $this->getCommonData($schoolId);
     $data['formType'] = null;
     $data['transaction'] = null;
+    $data['selectedSchoolId'] = $schoolId;
+    $data['transactions'] = $transactions; // Override with filtered transactions
     
     return Inertia::render('Menu/PaymentsPage', $data);
 }
@@ -802,7 +1115,7 @@ public function index(Request $request)
      */
     public function create()
     {
-        $data = $this->getCommonData();
+        $data = $this->getCommonData(null);
         $data['formType'] = 'create';
         $data['transaction'] = null;
         
@@ -1049,7 +1362,7 @@ public function index(Request $request)
      */
     public function show($id)
     {
-        $data = $this->getCommonData();
+        $data = $this->getCommonData(null);
         $data['formType'] = null;
         $data['transaction'] = Transaction::with('user')->findOrFail($id);
         
@@ -1064,7 +1377,7 @@ public function index(Request $request)
      */
     public function edit($id)
     {
-        $data = $this->getCommonData();
+        $data = $this->getCommonData(null);
         $data['formType'] = 'edit';
         $data['transaction'] = Transaction::with('user')->findOrFail($id);
         
@@ -1292,6 +1605,7 @@ public function index(Request $request)
         
         $month = $selectedDate->month;
         $year = $selectedDate->year;
+        $schoolId = $request->input('school_id');
         
         // Find employees who have already been paid this month
         $alreadyPaidUserIds = Transaction::whereRaw('MONTH(payment_date) = ?', [$month])
@@ -1304,9 +1618,21 @@ public function index(Request $request)
             ->toArray();
         
         // Get all employees with their details
-        $allUsers = User::with(['teacher', 'assistant'])
-            ->whereIn('role', ['teacher', 'assistant'])
-            ->get();
+        $allUsersQuery = User::with(['teacher', 'assistant'])
+            ->whereIn('role', ['teacher', 'assistant']);
+            
+        // Apply school filter for admin users
+        $authUser = Auth::user();
+        if ($authUser && $authUser->role === 'admin' && $schoolId) {
+            $schoolUserIds = $this->getSchoolUserIds($schoolId);
+            if (!empty($schoolUserIds)) {
+                $allUsersQuery->whereIn('id', $schoolUserIds);
+            } else {
+                $allUsersQuery->whereRaw('1=0');
+            }
+        }
+        
+        $allUsers = $allUsersQuery->get();
         
         // Filter users: exclude teachers with 0 wallet and already paid employees
         $eligibleUsers = $allUsers->filter(function($user) use ($alreadyPaidUserIds) {
@@ -2085,6 +2411,17 @@ public function processMonthRecurringTransactions(Request $request)
     }
 
     /**
+     * Get teacher IDs that belong to a specific school
+     */
+    private function getSchoolTeacherIds($schoolId)
+    {
+        return DB::table('school_teacher')
+            ->where('school_id', $schoolId)
+            ->pluck('teacher_id')
+            ->toArray();
+    }
+
+    /**
      * API: Get teacher earnings per month (paid only)
      * Optional filters: teacher_id, month (YYYY-MM)
      * Returns: [{teacherId, teacherName, month, year, totalEarned}]
@@ -2096,9 +2433,33 @@ public function processMonthRecurringTransactions(Request $request)
         $schoolId = $request->input('school_id');
         $classId = $request->input('class_id');
 
+        Log::info('teacherMonthlyEarningsReport called', [
+            'teacher_id' => $teacherId,
+            'month' => $month,
+            'school_id' => $schoolId,
+            'class_id' => $classId,
+            'all_params' => $request->all()
+        ]);
+
+        // Check if user is assistant and filter by their schools
+        $authUser = Auth::user();
+        $isAssistant = $authUser && $authUser->role === 'assistant' && $authUser->assistant;
+        $assistantSchoolIds = [];
+        
+        if ($isAssistant) {
+            $selectedSchoolId = session('school_id');
+            if ($selectedSchoolId) {
+                $assistantSchoolIds = [$selectedSchoolId];
+            } else {
+                $assistantSchoolIds = $authUser->assistant->schools()->pluck('schools.id')->toArray();
+            }
+        }
+
         // Get all memberships with payments (including partial payments) - same approach as TeacherController
         $memberships = \App\Models\Membership::withTrashed()
             ->when($schoolId, function($q) use ($schoolId) {
+                Log::info('Applying school filter', ['school_id' => $schoolId]);
+                // Filter by students in the school
                 $q->whereHas('student', function($q2) use ($schoolId) {
                     $q2->where('schoolId', $schoolId);
                 });
@@ -2111,11 +2472,45 @@ public function processMonthRecurringTransactions(Request $request)
             ->when($teacherId, function($q) use ($teacherId) {
                 $q->whereJsonContains('teachers', [['teacherId' => (string)$teacherId]]);
             })
+            // Filter by assistant's schools if user is assistant
+            ->when($isAssistant && !empty($assistantSchoolIds), function($q) use ($assistantSchoolIds) {
+                $q->whereHas('student', function($q2) use ($assistantSchoolIds) {
+                    $q2->whereIn('schoolId', $assistantSchoolIds);
+                });
+            })
             ->with(['invoices' => function($query) {
                 // Only include non-deleted invoices (same as TeacherController)
                 $query->whereNull('deleted_at');
             }, 'student', 'student.school', 'student.class', 'offer'])
             ->get();
+        
+        // If school filter is applied, filter memberships to only include teachers who belong to that school
+        if ($schoolId) {
+            $schoolTeacherIds = $this->getSchoolTeacherIds($schoolId);
+            Log::info('School teacher IDs', ['school_id' => $schoolId, 'teacher_ids' => $schoolTeacherIds]);
+            
+            $memberships = $memberships->filter(function($membership) use ($schoolTeacherIds) {
+                $teachers = $membership->teachers ?? [];
+                foreach ($teachers as $teacher) {
+                    if (in_array($teacher['teacherId'], $schoolTeacherIds)) {
+                        return true; // Keep this membership if it has at least one teacher from the school
+                    }
+                }
+                return false; // Remove this membership if no teachers belong to the school
+            });
+        }
+        
+        Log::info('Memberships found', [
+            'count' => $memberships->count(),
+            'school_id_filter' => $schoolId,
+            'memberships' => $memberships->map(function($m) {
+                return [
+                    'id' => $m->id,
+                    'student_school_id' => $m->student ? $m->student->schoolId : null,
+                    'teachers' => $m->teachers
+                ];
+            })->toArray()
+        ]);
         
         // Extract invoices from memberships
         $invoices = $memberships->flatMap(function ($membership) {
@@ -2166,6 +2561,26 @@ public function processMonthRecurringTransactions(Request $request)
                 
                 $teacher = \App\Models\Teacher::find($teacherData['teacherId']);
                 if (!$teacher) continue;
+                
+                // Filter teachers by assistant's schools if user is assistant
+                if ($isAssistant && !empty($assistantSchoolIds)) {
+                    // Check if teacher is assigned to classes in assistant's schools
+                    $teacherInAssistantSchool = DB::table('classes_teacher')
+                        ->join('classes', 'classes_teacher.classes_id', '=', 'classes.id')
+                        ->where('classes_teacher.teacher_id', $teacher->id)
+                        ->whereIn('classes.school_id', $assistantSchoolIds)
+                        ->exists();
+                    
+                    // Check if teacher is directly assigned to assistant's schools
+                    $teacherDirectlyInAssistantSchool = DB::table('school_teacher')
+                        ->where('teacher_id', $teacher->id)
+                        ->whereIn('school_id', $assistantSchoolIds)
+                        ->exists();
+                    
+                    if (!$teacherInAssistantSchool && !$teacherDirectlyInAssistantSchool) {
+                        continue; // Skip this teacher if not in assistant's schools
+                    }
+                }
                 
                 // Calculate teacher earnings per month based on Offer percentage
                 $offer = $invoice->offer;
@@ -2259,6 +2674,12 @@ public function processMonthRecurringTransactions(Request $request)
         }
         
         
+        Log::info('Final teacher earnings result', [
+            'school_id_filter' => $schoolId,
+            'earnings_count' => count($earnings),
+            'earnings' => array_values($earnings)
+        ]);
+
         // Return as array
         return response()->json(array_values($earnings));
     }
@@ -2281,6 +2702,20 @@ public function processMonthRecurringTransactions(Request $request)
             return response()->json(['error' => 'teacher_id is required'], 400);
         }
         
+        // Check if user is assistant and filter by their schools
+        $authUser = Auth::user();
+        $isAssistant = $authUser && $authUser->role === 'assistant' && $authUser->assistant;
+        $assistantSchoolIds = [];
+        
+        if ($isAssistant) {
+            $selectedSchoolId = session('school_id');
+            if ($selectedSchoolId) {
+                $assistantSchoolIds = [$selectedSchoolId];
+            } else {
+                $assistantSchoolIds = $authUser->assistant->schools()->pluck('schools.id')->toArray();
+            }
+        }
+        
         // Get all memberships with payments (including partial payments) - same approach as TeacherController
         $memberships = \App\Models\Membership::withTrashed()
             ->when($schoolId, function($q) use ($schoolId) {
@@ -2295,6 +2730,12 @@ public function processMonthRecurringTransactions(Request $request)
             })
             ->when($teacherId, function($q) use ($teacherId) {
                 $q->whereJsonContains('teachers', [['teacherId' => (string)$teacherId]]);
+            })
+            // Filter by assistant's schools if user is assistant
+            ->when($isAssistant && !empty($assistantSchoolIds), function($q) use ($assistantSchoolIds) {
+                $q->whereHas('student', function($q2) use ($assistantSchoolIds) {
+                    $q2->whereIn('schoolId', $assistantSchoolIds);
+                });
             })
             ->with(['invoices' => function($query) {
                 // Only include non-deleted invoices (same as TeacherController)
@@ -2460,6 +2901,7 @@ public function processMonthRecurringTransactions(Request $request)
         try {
             $month = (int) $request->query('month'); // 1-12
             $year = (int) $request->query('year');
+            $schoolId = $request->query('school_id');
 
             if ($month < 1 || $month > 12 || $year < 2000) {
                 return response()->json([
@@ -2471,10 +2913,17 @@ public function processMonthRecurringTransactions(Request $request)
             $targetMonthKey = sprintf('%04d-%02d', $year, $month);
 
             // Revenue from invoices distributed across selected_months
-            $invoices = DB::table('invoices')
-                ->select('id', 'billDate', 'amountPaid', 'selected_months', 'includePartialMonth', 'partialMonthAmount')
-                ->whereNull('deleted_at')
-                ->get();
+            $invoicesQuery = DB::table('invoices')
+                ->select('invoices.id', 'invoices.billDate', 'invoices.amountPaid', 'invoices.selected_months', 'invoices.includePartialMonth', 'invoices.partialMonthAmount')
+                ->whereNull('invoices.deleted_at');
+                
+            // Apply school filter if provided
+            if ($schoolId) {
+                $invoicesQuery->join('students', 'students.id', '=', 'invoices.student_id')
+                    ->where('students.schoolId', $schoolId);
+            }
+            
+            $invoices = $invoicesQuery->get();
 
             $totalRevenue = 0.0;
             $invoiceCountForMonth = 0;
@@ -2521,6 +2970,17 @@ public function processMonthRecurringTransactions(Request $request)
             $baseQuery = DB::table('transactions')
                 ->whereYear('payment_date', $year)
                 ->whereMonth('payment_date', $month);
+                
+            // Apply school filter to expenses if provided
+            if ($schoolId) {
+                $schoolUserIds = $this->getSchoolUserIds($schoolId);
+                if (!empty($schoolUserIds)) {
+                    $baseQuery->whereIn('user_id', $schoolUserIds);
+                } else {
+                    // If no users found for the school, return zero expenses
+                    $baseQuery->whereRaw('1=0');
+                }
+            }
 
             $totalSalaries = (float) (clone $baseQuery)->where('type', 'salary')->sum(DB::raw('CAST(amount AS DECIMAL(10,2))'));
             $totalPayments = (float) (clone $baseQuery)->where('type', 'payment')->sum(DB::raw('CAST(amount AS DECIMAL(10,2))'));

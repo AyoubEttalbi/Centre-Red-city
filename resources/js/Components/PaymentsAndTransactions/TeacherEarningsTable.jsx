@@ -48,7 +48,7 @@ const COLORS = [
   '#8B5CF6', '#06B6D4', '#F97316', '#84CC16'
 ];
 
-const TeacherEarningsTable = ({ teachers = [] }) => {
+const TeacherEarningsTable = ({ teachers = [], schools: schoolsProp = [] }) => {
     const [data, setData] = useState([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
@@ -59,13 +59,14 @@ const TeacherEarningsTable = ({ teachers = [] }) => {
     const [selectedTeacher, setSelectedTeacher] = useState("");
     const [detail, setDetail] = useState(null);
     const [selectedLineTeachers, setSelectedLineTeachers] = useState([]);
-    const [schools, setSchools] = useState([]);
+    const [schools, setSchools] = useState(schoolsProp);
     const [classes, setClasses] = useState([]);
     const [selectedSchool, setSelectedSchool] = useState("");
     const [selectedClass, setSelectedClass] = useState("");
     const [isFilterExpanded, setIsFilterExpanded] = useState(false);
     const [isTeacherSelectOpen, setIsTeacherSelectOpen] = useState(false);
     const [teacherSearchTerm, setTeacherSearchTerm] = useState("");
+    const [schoolsLoading, setSchoolsLoading] = useState(false);
     const teacherSelectRef = React.useRef(null);
     
     // Pagination state
@@ -85,23 +86,50 @@ const TeacherEarningsTable = ({ teachers = [] }) => {
         };
     }, []);
 
-    // Fetch schools on mount
+    // Update schools when prop changes
     useEffect(() => {
-        axios.get("/schoolsForFilters").then((res) => {
-            if (Array.isArray(res.data)) {
-                setSchools(res.data);
-            } else if (Array.isArray(res.data.schools)) {
-                setSchools(res.data.schools);
-            } else {
-                setSchools([]);
-            }
-        });
-    }, []);
+        if (Array.isArray(schoolsProp) && schoolsProp.length > 0) {
+            console.log('Schools received from prop:', schoolsProp);
+            setSchools(schoolsProp);
+            setSchoolsLoading(false);
+        } else if (schoolsProp.length === 0) {
+            // Fallback to fetching if no schools provided
+            setSchoolsLoading(true);
+            axios.get("/schoolsForFilters")
+                .then((res) => {
+                    console.log('Schools API response:', res.data);
+                    if (Array.isArray(res.data)) {
+                        setSchools(res.data);
+                    } else if (Array.isArray(res.data.schools)) {
+                        setSchools(res.data.schools);
+                    } else {
+                        console.warn('Unexpected schools data format:', res.data);
+                        setSchools([]);
+                    }
+                })
+                .catch((error) => {
+                    console.error('Error fetching schools:', error);
+                    setSchools([]);
+                })
+                .finally(() => {
+                    setSchoolsLoading(false);
+                });
+        }
+    }, [schoolsProp]);
 
     // Fetch classes when school changes
     useEffect(() => {
         if (selectedSchool) {
-            axios.get(`/classesForFilters?school_id=${selectedSchool}`).then((res) => setClasses(res.data)).catch(() => setClasses([]));
+            console.log('Fetching classes for school:', selectedSchool);
+            axios.get(`/classesForFilters?school_id=${selectedSchool}`)
+                .then((res) => {
+                    console.log('Classes API response:', res.data);
+                    setClasses(res.data);
+                })
+                .catch((error) => {
+                    console.error('Error fetching classes:', error);
+                    setClasses([]);
+                });
         } else {
             setClasses([]);
         }
@@ -113,17 +141,26 @@ const TeacherEarningsTable = ({ teachers = [] }) => {
         setError(null);
         // Reset to first page when filters change
         setCurrentPage(1);
+        
+        const params = {
+            month: selectedMonth ? selectedMonth : undefined,
+            teacher_id: selectedTeacher || undefined,
+            school_id: selectedSchool || undefined,
+            class_id: selectedClass || undefined,
+        };
+        
+        console.log('Fetching teacher earnings with params:', params);
+        
         axios
-            .get("/teacher-earnings-report", {
-                params: {
-                    month: selectedMonth ? selectedMonth : undefined,
-                    teacher_id: selectedTeacher || undefined,
-                    school_id: selectedSchool || undefined,
-                    class_id: selectedClass || undefined,
-                },
+            .get("/teacher-earnings-report", { params })
+            .then((res) => {
+                console.log('Teacher earnings API response:', res.data);
+                setData(res.data);
             })
-            .then((res) => setData(res.data))
-            .catch((err) => setError("Erreur lors du chargement des données."))
+            .catch((err) => {
+                console.error('Error fetching teacher earnings:', err);
+                setError("Erreur lors du chargement des données.");
+            })
             .finally(() => setLoading(false));
     }, [selectedMonth, selectedTeacher, selectedSchool, selectedClass]);
 
@@ -478,17 +515,35 @@ const TeacherEarningsTable = ({ teachers = [] }) => {
                                     <label className="block text-sm font-medium text-gray-700">
                                         <School className="w-4 h-4 inline mr-1" />
                                         École
+                                        {schools.length > 0 && (
+                                            <span className="ml-2 text-xs text-gray-500">
+                                                ({schools.length} école{schools.length !== 1 ? 's' : ''})
+                                            </span>
+                                        )}
                                     </label>
                                     <select
                                         className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors duration-200"
                                         value={selectedSchool}
                                         onChange={(e) => setSelectedSchool(e.target.value)}
+                                        disabled={schoolsLoading}
                                     >
-                                        <option value="">Toutes les écoles</option>
+                                        <option value="">
+                                            {schoolsLoading ? "Chargement..." : "Toutes les écoles"}
+                                        </option>
                                         {Array.isArray(schools) && schools.map((s) => (
                                             <option key={s.id} value={s.id}>{s.name}</option>
                                         ))}
                                     </select>
+                                    {schoolsLoading && (
+                                        <p className="text-xs text-gray-500">
+                                            Chargement des écoles...
+                                        </p>
+                                    )}
+                                    {!schoolsLoading && schools.length === 0 && (
+                                        <p className="text-xs text-gray-500">
+                                            Aucune école trouvée
+                                        </p>
+                                    )}
                                 </div>
                                 
                                 <div className="space-y-2">

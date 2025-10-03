@@ -72,8 +72,8 @@ class TeacherController extends Controller
         ];
         
         $result = $uploadApi->upload($file->getRealPath(), $options);
-    
-    return [
+        
+        return [
             'secure_url' => $result['secure_url'],
             'public_id' => $result['public_id'],
         ];
@@ -454,8 +454,8 @@ class TeacherController extends Controller
                     // Only include non-deleted invoices
                     $query->whereNull('deleted_at');
                 }, 'student', 'student.school', 'student.class', 'offer'])
-            ->get();
-        
+                ->get();
+            
             // Debug: Log membership filtering
             Log::info('Membership filtering results', [
                 'teacher_id' => $teacher->id,
@@ -499,10 +499,10 @@ class TeacherController extends Controller
                     
                     // Get selected months for this invoice
                     $selectedMonths = $invoice->selected_months ?? [];
-            if (is_string($selectedMonths)) {
-                $selectedMonths = json_decode($selectedMonths, true) ?? [];
-            }
-            
+                    if (is_string($selectedMonths)) {
+                        $selectedMonths = json_decode($selectedMonths, true) ?? [];
+                    }
+
                     // Determine bill month (format YYYY-MM) for possible partial-month inclusion
                     $billMonth = $invoice->billDate ? ($invoice->billDate instanceof \Carbon\Carbon ? $invoice->billDate->format('Y-m') : date('Y-m', strtotime($invoice->billDate))) : null;
                     if (!$billMonth) {
@@ -511,7 +511,7 @@ class TeacherController extends Controller
                     }
 
                     // If no selected_months provided, fallback to billDate/created_at month
-            if (empty($selectedMonths)) {
+                    if (empty($selectedMonths)) {
                         $selectedMonths = [$billMonth];
                     }
 
@@ -620,7 +620,7 @@ class TeacherController extends Controller
                             Log::info('Processing month for invoice', [
                                 'invoice_id' => $invoice->id,
                                 'student_id' => $membership->student_id,
-                            'month' => $month,
+                                'month' => $month,
                                 'date_filter' => $filters['date_filter'] ?? 'none',
                                 'month_matches_filter' => $month === ($filters['date_filter'] ?? 'none'),
                             ]);
@@ -644,16 +644,6 @@ class TeacherController extends Controller
                         
                         $amountForThisMonth = ($includePartialMonth && $partialMonthAmount > 0 && $month === $billMonth) ? $teacherAmountForPartial : $fullMonthsAmount;
 
-                        // FIXED: Use actual amount from payment records instead of calculated amount
-                        $actualTeacherAmount = 0;
-                        if ($teacherPayment) {
-                            // Use the actual amount paid to teacher from payment records
-                            $actualTeacherAmount = round((float)($teacherPayment->total_paid_to_teacher ?? 0), 2);
-                        } else {
-                            // Fallback to calculated amount if no payment record exists
-                            $actualTeacherAmount = $amountForThisMonth;
-                        }
-
                         $monthlyInvoices[] = [
                             'id' => $invoice->id . '_' . $month, // Unique ID for each month
                             'invoice_id' => $invoice->id,
@@ -676,7 +666,7 @@ class TeacherController extends Controller
                             'endDate' => $invoice->endDate,
                             'includePartialMonth' => $invoice->includePartialMonth,
                             'partialMonthAmount' => $invoice->partialMonthAmount,
-                            'teacher_amount' => $actualTeacherAmount, // FIXED: Use actual amount from payment records
+                            'teacher_amount' => $amountForThisMonth, // Monthly amount instead of total
                             'months_count' => 1, // Always 1 month per row
                             'total_months' => count($selectedMonths), // Total months for reference
                             'membership_deleted' => !is_null($membership->deleted_at), // Add membership deletion status
@@ -851,7 +841,7 @@ class TeacherController extends Controller
                     $schoolName = 'Unknown';
                     if ($membership->student->school) {
                         $schoolName = $membership->student->school->name;
-        } else {
+                    } else {
                         $school = School::find($membership->student->schoolId);
                         if ($school) {
                             $schoolName = $school->name;
@@ -906,7 +896,7 @@ class TeacherController extends Controller
                     ->where('description', 'like', '%(Recurring payment from #' . $transaction->id . ')%')
                     ->whereBetween('payment_date', [$startDate, $endDate])
                     ->exists();
-                    
+                
                 $transaction->paid_this_month = $isPaidThisMonth;
             }
             
@@ -968,7 +958,7 @@ class TeacherController extends Controller
                 'recurringTransactions' => $recurringTransactions, // Add the recurring transactions
                 'transactions' => $transactions, // Add all transactions
             ]);
-    } catch (\Exception $e) {
+        } catch (\Exception $e) {
             Log::error('Error in TeacherController@show: ' . $e->getMessage(), [
                 'trace' => $e->getTraceAsString()
             ]);
@@ -1087,7 +1077,7 @@ class TeacherController extends Controller
             } else {
                 return redirect()->route('teachers.show', $teacher->id)->with('success', 'Teacher updated successfully.');
             }
-    } catch (\Exception $e) {
+        } catch (\Exception $e) {
             Log::error('Error updating teacher: ' . $e->getMessage());
             return redirect()->back()->with('error', 'Failed to update teacher. Please try again.');
         }
@@ -1205,7 +1195,7 @@ class TeacherController extends Controller
                     'user' => $userErrors,
                     'teacher' => $teacherErrors,
                 ]], 422);
-                } else {
+            } else {
                 // For Inertia/browser, redirect back with errors
                 return redirect()->back()
                     ->withErrors(['user' => $userErrors, 'teacher' => $teacherErrors])
@@ -1215,7 +1205,7 @@ class TeacherController extends Controller
             DB::rollBack();
             if ($request->expectsJson() || $request->isXmlHttpRequest()) {
                 return response()->json(['error' => 'Failed to create user and teacher.'], 500);
-                    } else {
+            } else {
                 return redirect()->back()->with('error', 'Failed to create user and teacher.');
             }
         }

@@ -144,7 +144,21 @@ class SchoolController extends Controller
      */
     public function listJson()
     {
-        return response()->json(School::all());
+        $authUser = Auth::user();
+        $isAssistant = $authUser && $authUser->role === 'assistant' && $authUser->assistant;
+        
+        if ($isAssistant) {
+            $selectedSchoolId = session('school_id');
+            if ($selectedSchoolId) {
+                $schools = School::where('id', $selectedSchoolId)->get();
+            } else {
+                $schools = $authUser->assistant->schools;
+            }
+        } else {
+            $schools = School::all();
+        }
+        
+        return response()->json($schools);
     }
 
     /**

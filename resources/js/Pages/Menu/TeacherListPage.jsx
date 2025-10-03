@@ -301,9 +301,7 @@ const TeacherListPage = ({
         >
             <td
                 className="flex items-center gap-4 p-4"
-                onClick={() => {
-                    if (role === "admin") navigateToTeacher(item.id);
-                }}
+                onClick={() => navigateToTeacher(item.id)}
             >
                 <img
                     src={
@@ -343,14 +341,12 @@ const TeacherListPage = ({
             </td>
             <td>
                 <div className="flex items-center gap-2">
-                    {role === "admin" && (
-                        <button 
-                            onClick={() => navigateToTeacher(item.id)}
-                            className="w-7 h-7 flex items-center justify-center rounded-full bg-lamaSky"
-                        >
-                            <Eye className="w-4 h-4 text-white" />
-                        </button>
-                    )}
+                    <button 
+                        onClick={() => navigateToTeacher(item.id)}
+                        className="w-7 h-7 flex items-center justify-center rounded-full bg-lamaSky"
+                    >
+                        <Eye className="w-4 h-4 text-white" />
+                    </button>
                     {role === "admin" && (
                         <>
                             <FormModal

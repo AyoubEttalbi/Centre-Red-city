@@ -17,6 +17,8 @@ const PaymentsList = ({
     onAddExpense,
     onEditEmployee,
     onDeleteEmployee,
+    selectedSchoolId,
+    schools = [],
 }) => {
     const [filterType, setFilterType] = useState("all");
     const [selectedTab, setSelectedTab] = useState(0);
@@ -166,6 +168,7 @@ const PaymentsList = ({
                             onEdit={onEditEmployee}
                             onMakePayment={onMakePayment}
                             users={safeUsers}
+                            selectedSchoolId={selectedSchoolId}
                         />
                     </Tab.Panel>
                     <Tab.Panel>
@@ -177,7 +180,7 @@ const PaymentsList = ({
                         />
                     </Tab.Panel>
                     <Tab.Panel>
-                        <TeacherEarningsTable />
+                        <TeacherEarningsTable schools={schools} />
                     </Tab.Panel>
                     <Tab.Panel>
                         <AdminEarningsSection adminEarnings={adminEarnings} />

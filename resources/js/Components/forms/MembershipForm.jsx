@@ -34,7 +34,20 @@ const MembershipForm = ({
     const [selectedOffer, setSelectedOffer] = useState(null);
     const [selectedSubjects, setSelectedSubjects] = useState([]);
     const [amounts, setAmounts] = useState({});
-    const role = usePage().props.auth.user.role;
+    const pageProps = usePage().props;
+    const role = pageProps.auth.user.role;
+    const allowedSchoolIds = role === "assistant"
+        ? (
+            pageProps?.selectedSchool?.id
+                ? [pageProps.selectedSchool.id]
+                : ((pageProps?.assistant_schools
+                    || pageProps?.schools_assistant
+                    || pageProps?.assistant?.schools
+                    || [])
+                    .map((s) => (typeof s === 'object' ? s.id : s))
+                )
+          )
+        : [];
     // Initialize react-hook-form with Zod validation
     const {
         register,
@@ -105,9 +118,26 @@ const MembershipForm = ({
         return newAmounts;
     };
 
-    // Filter teachers by subject
+    // Determine if teacher belongs to assistant's allowed schools
+    const teacherInAllowedSchools = (t) => {
+        if (!allowedSchoolIds || allowedSchoolIds.length === 0) return true;
+        // direct school_id
+        const schoolId = t.school_id || t.schoolId || null;
+        if (schoolId && allowedSchoolIds.includes(Number(schoolId))) return true;
+        // teacher.schools can be array of objects or ids
+        const teacherSchools = Array.isArray(t.schools) ? t.schools : [];
+        const teacherSchoolIds = teacherSchools.map((s) => (typeof s === 'object' ? s.id : Number(s))).filter(Boolean);
+        if (teacherSchoolIds.some((id) => allowedSchoolIds.includes(Number(id)))) return true;
+        // fallback via classes relation
+        const teacherClasses = Array.isArray(t.classes) ? t.classes : [];
+        const classSchoolIds = teacherClasses.map((c) => c.school_id || c.schoolId).filter(Boolean);
+        if (classSchoolIds.some((id) => allowedSchoolIds.includes(Number(id)))) return true;
+        return false;
+    };
+
+    // Filter teachers by subject and school (for assistants)
     const getTeachersForSubject = (subject) =>
-        teachers.filter((t) => t.subjects?.includes(subject));
+        teachers.filter((t) => (t.subjects?.includes(subject)) && teacherInAllowedSchools(t));
 
     // Handle form submission
     const onSubmit = (formData) => {

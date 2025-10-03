@@ -51,7 +51,7 @@ const menuItems = [
                 icon: "/credit-card.png",
                 label: "Paiements",
                 href: "/transactions",
-                visible: ["admin"],
+                visible: ["admin", "assistant"],
             },
             {
                 icon: "/cashier.png",
