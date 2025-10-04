@@ -134,14 +134,14 @@ const StudentForm = ({ type, data, levels, classes, schools, setOpen }) => {
     const addPrefix = (num) => (num ? `+212${num}` : "");
 
     // State to track selected values for shadcn/ui Select components
+    const [selectedSchool, setSelectedSchool] = useState(
+        data?.schoolId?.toString() || "",
+    );
     const [selectedLevel, setSelectedLevel] = useState(
         data?.levelId?.toString() || "",
     );
     const [selectedClass, setSelectedClass] = useState(
         data?.classId?.toString() || "",
-    );
-    const [selectedSchool, setSelectedSchool] = useState(
-        data?.schoolId?.toString() || "",
     );
     const [selectedStatus, setSelectedStatus] = useState(
         data?.status || "active",
@@ -169,7 +169,7 @@ const StudentForm = ({ type, data, levels, classes, schools, setOpen }) => {
     // State for validation errors not caught by the form
     const [serverErrors, setServerErrors] = useState({});
 
-    // State to hold filtered classes based on selected level
+    // State to hold filtered classes based on selected school
     const [filteredClasses, setFilteredClasses] = useState([]);
 
     const {
@@ -214,12 +214,12 @@ const StudentForm = ({ type, data, levels, classes, schools, setOpen }) => {
     // Set default values when data is available
     useEffect(() => {
         if (data) {
+            setValue("schoolId", data.schoolId?.toString());
             setValue("levelId", data.levelId?.toString());
             setValue("classId", data.classId?.toString());
-            setValue("schoolId", data.schoolId?.toString());
+            setSelectedSchool(data.schoolId?.toString());
             setSelectedLevel(data.levelId?.toString());
             setSelectedClass(data.classId?.toString());
-            setSelectedSchool(data.schoolId?.toString());
             setSelectedStatus(data.status);
             setSelectedAssurance(data.assurance === 1 ? "1" : data.assurance === "1" ? "1" : "0");
             setAssuranceAmount(data.assuranceAmount?.toString() || "");
@@ -234,19 +234,27 @@ const StudentForm = ({ type, data, levels, classes, schools, setOpen }) => {
         }
     }, [data, setValue]);
 
-    // Filter classes when level changes
+    // Filter classes when school or level changes
     useEffect(() => {
-        if (selectedLevel && classes) {
-            // Filter classes that match the selected level_id
-            const classesForLevel = classes.filter(
-                (cls) => cls.level_id.toString() === selectedLevel,
+        if (selectedSchool && classes) {
+            // Filter classes that match the selected school_id
+            let classesForSchool = classes.filter(
+                (cls) => cls.school_id?.toString() === selectedSchool,
             );
-            setFilteredClasses(classesForLevel);
+
+            // Further filter by level if a level is selected
+            if (selectedLevel) {
+                classesForSchool = classesForSchool.filter(
+                    (cls) => cls.level_id?.toString() === selectedLevel,
+                );
+            }
+
+            setFilteredClasses(classesForSchool);
 
             // If current selected class is not in filtered list, reset it
             if (
                 selectedClass &&
-                !classesForLevel.some(
+                !classesForSchool.some(
                     (cls) => cls.id.toString() === selectedClass,
                 )
             ) {
@@ -256,7 +264,7 @@ const StudentForm = ({ type, data, levels, classes, schools, setOpen }) => {
         } else {
             setFilteredClasses([]);
         }
-    }, [selectedLevel, classes, setValue]);
+    }, [selectedSchool, selectedLevel, classes, setValue]);
 
     // Handle form submission
     const onSubmit = handleSubmit((formData) => {
@@ -550,18 +558,58 @@ const StudentForm = ({ type, data, levels, classes, schools, setOpen }) => {
                     defaultValue={data?.massarCode}
                 />
                 <div className="flex flex-col gap-2 w-full">
+                    <label className="text-xs text-gray-600">École</label>
+                    <Select
+                        value={selectedSchool}
+                        onValueChange={(value) => {
+                            setSelectedSchool(value);
+                            setValue("schoolId", value);
+                            // Reset niveau and class when school changes
+                            setSelectedLevel("");
+                            setValue("levelId", "");
+                            setSelectedClass("");
+                            setValue("classId", "");
+                        }}
+                    >
+                        <SelectTrigger className="w-full bg-white ring-1 ring-gray-300 p-2 rounded-md text-sm">
+                            <SelectValue placeholder="Sélectionner une école" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            {schools?.map((school) => (
+                                <SelectItem
+                                    key={school.id}
+                                    value={school.id.toString()}
+                                >
+                                    {school.name}
+                                </SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                    {errors.schoolId?.message && (
+                        <p className="text-xs text-red-400">
+                            {errors.schoolId.message}
+                        </p>
+                    )}
+                </div>
+                <div className="flex flex-col gap-2 w-full">
                     <label className="text-xs text-gray-600">Niveau</label>
                     <Select
                         value={selectedLevel}
                         onValueChange={(value) => {
                             setSelectedLevel(value);
                             setValue("levelId", value);
+                            // Reset class when niveau changes
                             setSelectedClass("");
                             setValue("classId", "");
                         }}
+                        disabled={!selectedSchool}
                     >
                         <SelectTrigger className="w-full bg-white ring-1 ring-gray-300 p-2 rounded-md text-sm">
-                            <SelectValue placeholder="Sélectionner un niveau" />
+                            <SelectValue placeholder={
+                                !selectedSchool
+                                    ? "Sélectionner une école d'abord"
+                                    : "Sélectionner un niveau"
+                            } />
                         </SelectTrigger>
                         <SelectContent>
                             {levels?.map((level) => (
@@ -589,17 +637,19 @@ const StudentForm = ({ type, data, levels, classes, schools, setOpen }) => {
                             setValue("classId", value);
                         }}
                         disabled={
-                            !selectedLevel || filteredClasses.length === 0
+                            !selectedSchool || !selectedLevel || filteredClasses.length === 0
                         }
                     >
                         <SelectTrigger className="w-full bg-white ring-1 ring-gray-300 p-2 rounded-md text-sm">
                             <SelectValue
                                 placeholder={
-                                    !selectedLevel
-                                        ? "Sélectionner un niveau d'abord"
-                                        : filteredClasses.length === 0
-                                          ? "Aucune classe pour ce niveau"
-                                          : "Sélectionner une classe"
+                                    !selectedSchool
+                                        ? "Sélectionner une école d'abord"
+                                        : !selectedLevel
+                                          ? "Sélectionner un niveau d'abord"
+                                          : filteredClasses.length === 0
+                                            ? "Aucune classe disponible"
+                                            : "Sélectionner une classe"
                                 }
                             />
                         </SelectTrigger>
@@ -610,18 +660,16 @@ const StudentForm = ({ type, data, levels, classes, schools, setOpen }) => {
                                         key={classe.id}
                                         value={classe.id.toString()}
                                     >
-                                        {classe.name} (
-                                        {classe.school_id
-                                            ? `École : ${schools.find((school) => school.id === classe.school_id)?.name}`
-                                            : "Aucune école"}
-                                        )
+                                        {classe.name}
                                     </SelectItem>
                                 ))
                             ) : (
                                 <div className="p-2 text-sm text-gray-500">
-                                    {!selectedLevel
-                                        ? "Sélectionner un niveau d'abord"
-                                        : "Aucune classe pour ce niveau"}
+                                    {!selectedSchool
+                                        ? "Sélectionner une école d'abord"
+                                        : !selectedLevel
+                                          ? "Sélectionner un niveau d'abord"
+                                          : "Aucune classe disponible"}
                                 </div>
                             )}
                         </SelectContent>
@@ -629,35 +677,6 @@ const StudentForm = ({ type, data, levels, classes, schools, setOpen }) => {
                     {errors.classId?.message && (
                         <p className="text-xs text-red-400">
                             {errors.classId.message}
-                        </p>
-                    )}
-                </div>
-                <div className="flex flex-col gap-2 w-full">
-                    <label className="text-xs text-gray-600">École</label>
-                    <Select
-                        value={selectedSchool}
-                        onValueChange={(value) => {
-                            setSelectedSchool(value);
-                            setValue("schoolId", value);
-                        }}
-                    >
-                        <SelectTrigger className="w-full bg-white ring-1 ring-gray-300 p-2 rounded-md text-sm">
-                            <SelectValue placeholder="Sélectionner une école" />
-                        </SelectTrigger>
-                        <SelectContent>
-                            {schools?.map((school) => (
-                                <SelectItem
-                                    key={school.id}
-                                    value={school.id.toString()}
-                                >
-                                    {school.name}
-                                </SelectItem>
-                            ))}
-                        </SelectContent>
-                    </Select>
-                    {errors.schoolId?.message && (
-                        <p className="text-xs text-red-400">
-                            {errors.schoolId.message}
                         </p>
                     )}
                 </div>

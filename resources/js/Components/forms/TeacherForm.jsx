@@ -57,6 +57,9 @@ const schema = z.object({
 });
 
 const TeacherForm = ({ type, data, subjects, classes, schools, setOpen }) => {
+
+    console.log("classes", classes)
+
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [selectedStatus, setSelectedStatus] = useState(
         data?.status || "active",
@@ -358,33 +361,106 @@ const TeacherForm = ({ type, data, subjects, classes, schools, setOpen }) => {
                     </div>
                 </div>
                 {/* Informations supplémentaires */}
-                <div className="flex flex-wrap gap-4">
-                    {/* Statut */}
-                    <div className="flex flex-col gap-2 w-full md:w-1/4">
-                        <label className="text-xs text-gray-600">Statut</label>
-                        <Select
-                            value={selectedStatus}
-                            onValueChange={(value) => {
-                                setSelectedStatus(value);
-                                setValue("status", value);
-                            }}
-                        >
-                            <SelectTrigger className="w-full bg-white ring-1 ring-gray-300 p-2 rounded-md text-sm">
-                                <SelectValue placeholder="Sélectionner le statut" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="active">Actif</SelectItem>
-                                <SelectItem value="inactive">Inactif</SelectItem>
-                            </SelectContent>
-                        </Select>
-                        {errors.status && (
+                <div className="grid grid-cols-1 lg:grid-cols-3 md:grid-cols-2 gap-4">
+                    {/* Multi-sélection des écoles */}
+                    <div className="flex flex-col gap-2 w-full">
+                        <label className="text-xs text-gray-600">Écoles</label>
+                        <Popover>
+                            <PopoverTrigger asChild>
+                                <Button
+                                    variant="outline"
+                                    className="w-full justify-between bg-white ring-1 ring-gray-300 p-2 rounded-md text-sm h-auto min-h-10"
+                                >
+                                    {selectedSchools.length > 0
+                                        ? `${selectedSchools.length} sélectionnées`
+                                        : "Sélectionner les écoles"}
+                                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+
+                                </Button>
+                            </PopoverTrigger>
+                            <PopoverContent
+                                className="w-full p-0"
+                                align="start"
+                            >
+                                <Command>
+                                    <CommandInput placeholder="Rechercher une école..." />
+                                    <CommandList>
+                                        <CommandEmpty>
+                                            Aucune école trouvée.
+                                        </CommandEmpty>
+                                        <CommandGroup>
+                                            {schools?.map((school) => (
+                                                <CommandItem
+                                                    key={school.id}
+                                                    onSelect={() =>
+                                                        toggleSelection(
+                                                            school,
+                                                            selectedSchools,
+                                                            setSelectedSchools,
+                                                            "schools",
+                                                        )
+                                                    }
+                                                    className="flex items-center gap-2"
+                                                >
+                                                    <div
+                                                        className={`flex-shrink-0 rounded-full p-1 ${selectedSchools.some(
+                                                            (s) =>
+                                                                s.id ===
+                                                                school.id,
+                                                        )
+                                                                ? "text-black"
+                                                                : "opacity-50"
+                                                            }`}
+                                                    >
+                                                        <Check
+                                                            className={`h-4 w-4 ${selectedSchools.some(
+                                                                (s) =>
+                                                                    s.id ===
+                                                                    school.id,
+                                                            )
+                                                                    ? "opacity-100"
+                                                                    : "opacity-0"
+                                                                }`}
+                                                        />
+                                                    </div>
+                                                    {school.name}
+                                                </CommandItem>
+                                            ))}
+                                        </CommandGroup>
+                                    </CommandList>
+                                </Command>
+                            </PopoverContent>
+                        </Popover>
+                        <div className="flex flex-wrap gap-1 mt-1">
+                            {selectedSchools.map((school) => (
+                                <Badge
+                                    key={school.id}
+                                    variant="secondary"
+                                    className="flex items-center gap-1"
+                                >
+                                    {school.name}
+                                    <X
+                                        className="h-3 w-3 cursor-pointer"
+                                        onClick={() =>
+                                            removeItem(
+                                                school,
+                                                selectedSchools,
+                                                setSelectedSchools,
+                                                "schools",
+                                            )
+                                        }
+                                    />
+                                </Badge>
+                            ))}
+                        </div>
+                        {errors.schools && (
                             <p className="text-xs text-red-400">
-                                {errors.status.message}
+                                {errors.schools.message}
                             </p>
                         )}
                     </div>
                     {/* Multi-sélection des matières */}
-                    <div className="flex flex-col gap-2 w-full md:w-1/4">
+                    <div className="flex flex-col gap-2 w-full ">
                         <label className="text-xs text-gray-600">Matières</label>
                         <Popover>
                             <PopoverTrigger asChild>
@@ -396,6 +472,7 @@ const TeacherForm = ({ type, data, subjects, classes, schools, setOpen }) => {
                                         ? `${selectedSubjects.length} sélectionnées`
                                         : "Sélectionner les matières"}
                                     <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+
                                 </Button>
                             </PopoverTrigger>
                             <PopoverContent
@@ -423,26 +500,24 @@ const TeacherForm = ({ type, data, subjects, classes, schools, setOpen }) => {
                                                     className="flex items-center gap-2"
                                                 >
                                                     <div
-                                                        className={`flex-shrink-0 rounded-full p-1 ${
-                                                            selectedSubjects.some(
+                                                        className={`flex-shrink-0 rounded-full p-1 ${selectedSubjects.some(
+                                                            (s) =>
+                                                                s.id ===
+                                                                subject.id,
+                                                        )
+                                                                ? "text-black"
+                                                                : "opacity-50"
+                                                            }`}
+                                                    >
+                                                        <Check
+                                                            className={`h-4 w-4 ${selectedSubjects.some(
                                                                 (s) =>
                                                                     s.id ===
                                                                     subject.id,
                                                             )
-                                                                ? "text-black"
-                                                                : "opacity-50"
-                                                        }`}
-                                                    >
-                                                        <Check
-                                                            className={`h-4 w-4 ${
-                                                                selectedSubjects.some(
-                                                                    (s) =>
-                                                                        s.id ===
-                                                                        subject.id,
-                                                                )
                                                                     ? "opacity-100"
                                                                     : "opacity-0"
-                                                            }`}
+                                                                }`}
                                                         />
                                                     </div>
                                                     {subject.name}
@@ -482,7 +557,7 @@ const TeacherForm = ({ type, data, subjects, classes, schools, setOpen }) => {
                         )}
                     </div>
                     {/* Multi-sélection des classes */}
-                    <div className="flex flex-col gap-2 w-full md:w-1/4">
+                    <div className="flex flex-col gap-2 w-full ">
                         <label className="text-xs text-gray-600">Classes</label>
                         <Popover>
                             <PopoverTrigger asChild>
@@ -494,6 +569,7 @@ const TeacherForm = ({ type, data, subjects, classes, schools, setOpen }) => {
                                         ? `${selectedClasses.length} sélectionnées`
                                         : "Sélectionner les classes"}
                                     <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+
                                 </Button>
                             </PopoverTrigger>
                             <PopoverContent
@@ -521,29 +597,31 @@ const TeacherForm = ({ type, data, subjects, classes, schools, setOpen }) => {
                                                     className="flex items-center gap-2"
                                                 >
                                                     <div
-                                                        className={`flex-shrink-0 rounded-full p-1 ${
-                                                            selectedClasses.some(
+                                                        className={`flex-shrink-0 rounded-full p-1 ${selectedClasses.some(
+                                                            (c) =>
+                                                                c.id ===
+                                                                cls.id,
+                                                        )
+                                                                ? " text-black"
+                                                                : "opacity-50"
+                                                            }`}
+                                                    >
+                                                        <Check
+                                                            className={`h-2 w-2 ${selectedClasses.some(
                                                                 (c) =>
                                                                     c.id ===
                                                                     cls.id,
                                                             )
-                                                                ? " text-black"
-                                                                : "opacity-50"
-                                                        }`}
-                                                    >
-                                                        <Check
-                                                            className={`h-2 w-2 ${
-                                                                selectedClasses.some(
-                                                                    (c) =>
-                                                                        c.id ===
-                                                                        cls.id,
-                                                                )
                                                                     ? "opacity-100 "
                                                                     : "opacity-0"
-                                                            }`}
+                                                                }`}
                                                         />
                                                     </div>
-                                                    {cls.name}
+                                                    {cls.name} -{
+                                                        schools.map((s, i) => (
+                                                            s.id === cls.school_id ? s.name : ""
+                                                        ))
+                                                    }
                                                 </CommandItem>
                                             ))}
                                         </CommandGroup>
@@ -579,101 +657,27 @@ const TeacherForm = ({ type, data, subjects, classes, schools, setOpen }) => {
                             </p>
                         )}
                     </div>
-                    {/* Multi-sélection des écoles */}
-                    <div className="flex flex-col gap-2 w-full md:w-1/4">
-                        <label className="text-xs text-gray-600">Écoles</label>
-                        <Popover>
-                            <PopoverTrigger asChild>
-                                <Button
-                                    variant="outline"
-                                    className="w-full justify-between bg-white ring-1 ring-gray-300 p-2 rounded-md text-sm h-auto min-h-10"
-                                >
-                                    {selectedSchools.length > 0
-                                        ? `${selectedSchools.length} sélectionnées`
-                                        : "Sélectionner les écoles"}
-                                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                                </Button>
-                            </PopoverTrigger>
-                            <PopoverContent
-                                className="w-full p-0"
-                                align="start"
-                            >
-                                <Command>
-                                    <CommandInput placeholder="Rechercher une école..." />
-                                    <CommandList>
-                                        <CommandEmpty>
-                                            Aucune école trouvée.
-                                        </CommandEmpty>
-                                        <CommandGroup>
-                                            {schools?.map((school) => (
-                                                <CommandItem
-                                                    key={school.id}
-                                                    onSelect={() =>
-                                                        toggleSelection(
-                                                            school,
-                                                            selectedSchools,
-                                                            setSelectedSchools,
-                                                            "schools",
-                                                        )
-                                                    }
-                                                    className="flex items-center gap-2"
-                                                >
-                                                    <div
-                                                        className={`flex-shrink-0 rounded-full p-1 ${
-                                                            selectedSchools.some(
-                                                                (s) =>
-                                                                    s.id ===
-                                                                    school.id,
-                                                            )
-                                                                ? "text-black"
-                                                                : "opacity-50"
-                                                        }`}
-                                                    >
-                                                        <Check
-                                                            className={`h-4 w-4 ${
-                                                                selectedSchools.some(
-                                                                    (s) =>
-                                                                        s.id ===
-                                                                        school.id,
-                                                                )
-                                                                    ? "opacity-100"
-                                                                    : "opacity-0"
-                                                            }`}
-                                                        />
-                                                    </div>
-                                                    {school.name}
-                                                </CommandItem>
-                                            ))}
-                                        </CommandGroup>
-                                    </CommandList>
-                                </Command>
-                            </PopoverContent>
-                        </Popover>
-                        <div className="flex flex-wrap gap-1 mt-1">
-                            {selectedSchools.map((school) => (
-                                <Badge
-                                    key={school.id}
-                                    variant="secondary"
-                                    className="flex items-center gap-1"
-                                >
-                                    {school.name}
-                                    <X
-                                        className="h-3 w-3 cursor-pointer"
-                                        onClick={() =>
-                                            removeItem(
-                                                school,
-                                                selectedSchools,
-                                                setSelectedSchools,
-                                                "schools",
-                                            )
-                                        }
-                                    />
-                                </Badge>
-                            ))}
-                        </div>
-                        {errors.schools && (
+                    {/* Statut */}
+                    <div className="flex flex-col gap-2 w-full ">
+                        <label className="text-xs text-gray-600">Statut</label>
+                        <Select
+                            value={selectedStatus}
+                            onValueChange={(value) => {
+                                setSelectedStatus(value);
+                                setValue("status", value);
+                            }}
+                        >
+                            <SelectTrigger className="w-full bg-white ring-1 ring-gray-300 p-2 rounded-md text-sm">
+                                <SelectValue placeholder="Sélectionner le statut" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="active">Actif</SelectItem>
+                                <SelectItem value="inactive">Inactif</SelectItem>
+                            </SelectContent>
+                        </Select>
+                        {errors.status && (
                             <p className="text-xs text-red-400">
-                                {errors.schools.message}
+                                {errors.status.message}
                             </p>
                         )}
                     </div>
@@ -710,9 +714,8 @@ const TeacherForm = ({ type, data, subjects, classes, schools, setOpen }) => {
                 <button
                     type="submit"
                     disabled={loading}
-                    className={`bg-blue-500 hover:bg-blue-600 transition-all text-white p-2 rounded-md flex items-center justify-center ${
-                        loading ? "opacity-70 cursor-not-allowed" : ""
-                    }`}
+                    className={`bg-blue-500 hover:bg-blue-600 transition-all text-white p-2 rounded-md flex items-center justify-center ${loading ? "opacity-70 cursor-not-allowed" : ""
+                        }`}
                 >
                     {loading ? (
                         <span className="flex items-center gap-2">

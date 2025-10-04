@@ -2,8 +2,9 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { router, usePage } from '@inertiajs/react';
 import DashboardLayout from '@/Layouts/DashboardLayout';
 
-const AbsenceListPage = ({ teachers = [], classes = [] }) => {
+const AbsenceListPage = ({ teachers = [], classes = [], schools = [] }) => {
     const [formData, setFormData] = useState({
+        schoolId: '',
         teacherId: '',
         classId: '',
         month: (() => {
@@ -11,22 +12,43 @@ const AbsenceListPage = ({ teachers = [], classes = [] }) => {
             return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
         })()
     });
+
+    const [availableTeachers, setAvailableTeachers] = useState([]);
     const [availableClasses, setAvailableClasses] = useState([]);
     const [isDownloading, setIsDownloading] = useState(false);
     const [errors, setErrors] = useState({});
-    
+
     const { auth } = usePage().props;
     const userRole = auth?.user?.role;
 
-    // Update available classes when teacher selection changes
+    // ✅ Filter teachers by selected school
+    useEffect(() => {
+        if (formData.schoolId) {
+            const filteredTeachers = teachers.filter(t =>
+                t.schools?.some(s => s.id == formData.schoolId)
+            );
+            setAvailableTeachers(filteredTeachers);
+            setFormData(prev => ({
+                ...prev,
+                teacherId: '',
+                classId: ''
+            }));
+            setAvailableClasses([]);
+        } else {
+            setAvailableTeachers([]);
+            setAvailableClasses([]);
+            setFormData(prev => ({ ...prev, teacherId: '', classId: '' }));
+        }
+    }, [formData.schoolId, teachers]);
+
+    // ✅ Filter classes when teacher changes
     useEffect(() => {
         if (formData.teacherId) {
-            const filteredClasses = classes.filter(cls => 
-                cls.teachers?.some(teacher => teacher.id == formData.teacherId)
+            const filteredClasses = classes.filter(cls =>
+                cls.teachers?.some(t => t.id == formData.teacherId)
             );
             setAvailableClasses(filteredClasses);
-            
-            // Reset class selection if current class is not available for selected teacher
+
             if (formData.classId && !filteredClasses.some(cls => cls.id == formData.classId)) {
                 setFormData(prev => ({ ...prev, classId: '' }));
             }
@@ -38,16 +60,10 @@ const AbsenceListPage = ({ teachers = [], classes = [] }) => {
 
     const validateForm = useCallback(() => {
         const newErrors = {};
-        
-        if (!formData.teacherId) {
-            newErrors.teacherId = 'Veuillez sélectionner un enseignant';
-        }
-        if (!formData.classId) {
-            newErrors.classId = 'Veuillez sélectionner une classe';
-        }
-        if (!formData.month) {
-            newErrors.month = 'Veuillez sélectionner un mois';
-        }
+        if (!formData.schoolId) newErrors.schoolId = 'Veuillez sélectionner une école';
+        if (!formData.teacherId) newErrors.teacherId = 'Veuillez sélectionner un enseignant';
+        if (!formData.classId) newErrors.classId = 'Veuillez sélectionner une classe';
+        if (!formData.month) newErrors.month = 'Veuillez sélectionner un mois';
 
         setErrors(newErrors);
         return Object.keys(newErrors).length === 0;
@@ -55,8 +71,7 @@ const AbsenceListPage = ({ teachers = [], classes = [] }) => {
 
     const handleInputChange = useCallback((field, value) => {
         setFormData(prev => ({ ...prev, [field]: value }));
-        
-        // Clear error for this field when user starts typing
+
         if (errors[field]) {
             setErrors(prev => ({ ...prev, [field]: '' }));
         }
@@ -64,16 +79,13 @@ const AbsenceListPage = ({ teachers = [], classes = [] }) => {
 
     const handleDownload = async (e) => {
         e.preventDefault();
-        
-        if (!validateForm()) {
-            return;
-        }
+
+        if (!validateForm()) return;
 
         try {
             setIsDownloading(true);
             const downloadUrl = `/absence-list/download?teacher_id=${formData.teacherId}&class_id=${formData.classId}&date=${formData.month}-01`;
-            
-            // Create a temporary link element for download
+
             const link = document.createElement('a');
             link.href = downloadUrl;
             link.target = '_blank';
@@ -81,16 +93,14 @@ const AbsenceListPage = ({ teachers = [], classes = [] }) => {
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
-            
         } catch (error) {
             console.error('Download failed:', error);
-            // You could add toast notification here
         } finally {
             setTimeout(() => setIsDownloading(false), 1500);
         }
     };
 
-    const isFormValid = formData.teacherId && formData.classId && formData.month;
+    const isFormValid = formData.schoolId && formData.teacherId && formData.classId && formData.month;
 
     return (
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 m-4 mt-0 max-w-2xl mx-auto">
@@ -99,11 +109,44 @@ const AbsenceListPage = ({ teachers = [], classes = [] }) => {
                     Liste de présence
                 </h1>
                 <p className="text-gray-600 text-sm">
-                    Sélectionnez un enseignant, une classe et un mois pour télécharger la liste de présence
+                    Sélectionnez une école, un enseignant, une classe et un mois pour télécharger la liste de présence
                 </p>
             </div>
 
             <form onSubmit={handleDownload} className="space-y-6" noValidate>
+                {/* School Selection */}
+                <div className="space-y-1">
+                    <label 
+                        htmlFor="school-select" 
+                        className="block text-sm font-medium text-gray-700"
+                    >
+                        École <span className="text-red-500">*</span>
+                    </label>
+                    <select
+                        id="school-select"
+                        className={`w-full rounded-md border shadow-sm px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-offset-0 transition-colors ${
+                            errors.schoolId 
+                                ? 'border-red-300 focus:border-red-500 focus:ring-red-200' 
+                                : 'border-gray-300 focus:border-lamaPurple focus:ring-lamaPurple/20'
+                        }`}
+                        value={formData.schoolId}
+                        onChange={e => handleInputChange('schoolId', e.target.value)}
+                        required
+                    >
+                        <option value="">-- Sélectionner une école --</option>
+                        {schools.map(school => (
+                            <option key={school.id} value={school.id}>
+                                {school.name}
+                            </option>
+                        ))}
+                    </select>
+                    {errors.schoolId && (
+                        <p className="text-sm text-red-600 mt-1" role="alert">
+                            {errors.schoolId}
+                        </p>
+                    )}
+                </div>
+
                 {/* Teacher Selection */}
                 <div className="space-y-1">
                     <label 
@@ -121,10 +164,15 @@ const AbsenceListPage = ({ teachers = [], classes = [] }) => {
                         }`}
                         value={formData.teacherId}
                         onChange={e => handleInputChange('teacherId', e.target.value)}
+                        disabled={!formData.schoolId}
                         required
                     >
-                        <option value="">-- Sélectionner un enseignant --</option>
-                        {teachers.map(teacher => (
+                        <option value="">
+                            {!formData.schoolId 
+                                ? '-- Sélectionnez d\'abord une école --' 
+                                : '-- Sélectionner un enseignant --'}
+                        </option>
+                        {availableTeachers.map(teacher => (
                             <option key={teacher.id} value={teacher.id}>
                                 {teacher.first_name} {teacher.last_name}
                             </option>

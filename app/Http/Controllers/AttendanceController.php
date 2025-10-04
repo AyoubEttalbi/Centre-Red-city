@@ -1109,24 +1109,46 @@ Ig: https://www.instagram.com/centreredcity?igsh=MXg1NjJwam80eTNoMw%3D%3D&utm_so
      * Page de sélection pour la liste de présence (frontend)
      */
     public function absenceListPage()
-    {
-        $teachers = \App\Models\Teacher::select('id', 'first_name', 'last_name')->get();
-        $classes = \App\Models\Classes::with(['teachers:id,first_name,last_name'])->get()->map(function($class) {
+{
+    $teachers = \App\Models\Teacher::with(['schools:id,name'])
+        ->select('id', 'first_name', 'last_name')
+        ->get()
+        ->map(function ($teacher) {
             return [
-                'id' => $class->id,
-                'name' => $class->name,
-                'teachers' => $class->teachers->map(function($t) {
+                'id' => $teacher->id,
+                'first_name' => $teacher->first_name,
+                'last_name' => $teacher->last_name,
+                'schools' => $teacher->schools->map(function ($school) {
                     return [
-                        'id' => $t->id,
-                        'first_name' => $t->first_name,
-                        'last_name' => $t->last_name,
+                        'id' => $school->id,
+                        'name' => $school->name,
                     ];
                 })->toArray(),
             ];
         });
-        return \Inertia\Inertia::render('Menu/AbsenceListPage', [
-            'teachers' => $teachers,
-            'classes' => $classes,
-        ]);
-    }
+
+    $classes = \App\Models\Classes::with(['teachers:id,first_name,last_name'])->get()->map(function ($class) {
+        return [
+            'id' => $class->id,
+            'name' => $class->name,
+            'teachers' => $class->teachers->map(function ($t) {
+                return [
+                    'id' => $t->id,
+                    'first_name' => $t->first_name,
+                    'last_name' => $t->last_name,
+                ];
+            })->toArray(),
+        ];
+    });
+
+    // ✅ distinct schools list
+    $schools = \App\Models\School::select('id', 'name')->get();
+
+    return \Inertia\Inertia::render('Menu/AbsenceListPage', [
+        'teachers' => $teachers,
+        'classes' => $classes,
+        'schools' => $schools,
+    ]);
+}
+
 }
