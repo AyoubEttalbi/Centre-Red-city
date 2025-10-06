@@ -30,14 +30,14 @@ const columns = [
         className: "hidden lg:table-cell",
     },
     {
-        header: "Adresse",
-        accessor: "address",
+        header: "Nom d'offre",
+        accessor: "offerNames",
         className: "hidden lg:table-cell",
     },
     {
         header: "Statut d'adhésion",
         accessor: "membershipStatus",
-        className: "hidden lg:table-cell",
+        className: "hidden md:table-cell",
     },
     {
         header: "Actions",
@@ -89,7 +89,7 @@ const StudentListPage = ({
                   (student.name && student.name.toLowerCase().includes(search)) ||
                   (student.studentId && student.studentId.toLowerCase().includes(search)) ||
                   (student.phone && student.phone.toLowerCase().includes(search)) ||
-                  (student.address && student.address.toLowerCase().includes(search)) ||
+                  (student.offerNames && student.offerNames.toLowerCase().includes(search)) ||
                   (student.guardianNumber && student.guardianNumber.toLowerCase().includes(search)) ||
                   (student.guardianName && student.guardianName.toLowerCase().includes(search)) ||
                   (normalizedSearch && normalizedStudentPhone.includes(normalizedSearch)) ||
@@ -367,75 +367,44 @@ const StudentListPage = ({
                 {Allclasses.find((group) => group.id === item.classId)?.name}
             </td>
             <td className="hidden md:table-cell">{item.guardianNumber}</td>
-            <td className="hidden md:table-cell">{item.address}</td>
-            <td className="hidden md:table-cell w-1/12">
-                {Allmemberships.filter(
-                    (membership) => membership.student_id === item.id,
-                ).length > 0 ? (
-                    <div className="flex flex-col space-y-1">
-                        {/* Payment ratio with colored stats */}
-                        <div className="flex items-center justify-between">
-                            <div className="flex items-center">
-                                <span className="font-semibold text-emerald-600">
-                                    {
-                                        Allmemberships.filter(
-                                            (membership) =>
-                                                membership.student_id ===
-                                                item.id &&
-                                                membership.payment_status ===
-                                                "paid",
-                                        ).length
-                                    }
-                                </span>
-                                <span className="mx-1 text-gray-400">/</span>
-                                <span className="font-medium text-gray-700">
-                                    {
-                                        Allmemberships.filter(
-                                            (membership) =>
-                                                membership.student_id ===
-                                                item.id,
-                                        ).length
-                                    }
-                                </span>
-                            </div>
-                        </div>
-                        {/* Progress bar with animation */}
-                        {(() => {
-                            const paid = Allmemberships.filter(
-                                (membership) =>
-                                    membership.student_id === item.id &&
-                                    membership.payment_status === "paid",
-                            ).length;
-                            const total = Allmemberships.filter(
-                                (membership) => membership.student_id === item.id,
-                            ).length;
-                            const percentage = total > 0 ? (paid / total) * 100 : 0;
+            <td className="hidden lg:table-cell">{item.offerNames || '-'}</td>
+            <td className="hidden md:table-cell">
+                {(() => {
+                    const status = item.paymentStatus;
+                    
+                    // No memberships
+                    if (!status || status.total === 0) {
+                        return (
+                            <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
+                                Aucune
+                            </span>
+                        );
+                    }
 
-                            let bgColorClass = "bg-gray-300";
-                            if (percentage === 100) bgColorClass = "bg-emerald-500";
-                            else if (percentage >= 75) bgColorClass = "bg-green-500";
-                            else if (percentage >= 50) bgColorClass = "bg-amber-500";
-                            else if (percentage > 0) bgColorClass = "bg-orange-500";
-                            else bgColorClass = "bg-red-500";
-
-                            return (
-                                <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
-                                    <motion.div
-                                        className={`h-full rounded-full ${bgColorClass}`}
-                                        initial={{ width: "0%" }}
-                                        animate={{ width: `${percentage}%` }}
-                                        transition={{
-                                            duration: 0.8,
-                                            ease: "easeInOut",
-                                        }}
-                                    ></motion.div>
-                                </div>
-                            );
-                        })()}
-                    </div>
-                ) : (
-                    "-"
-                )}
+                    // Determine priority status to display
+                    if (status.unpaid > 0) {
+                        return (
+                            <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                                {status.unpaid} non payée{status.unpaid > 1 ? 's' : ''}
+                            </span>
+                        );
+                    }
+                    
+                    if (status.partial > 0) {
+                        return (
+                            <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800">
+                                {status.partial} partielle{status.partial > 1 ? 's' : ''}
+                            </span>
+                        );
+                    }
+                    
+                    // All paid
+                    return (
+                        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800">
+                            Tout payé
+                        </span>
+                    );
+                })()}
             </td>
             <td className=" p-4">
                 <div className="flex items-center gap-2 justify-center">
