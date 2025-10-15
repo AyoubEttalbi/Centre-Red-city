@@ -43,25 +43,9 @@ class Membership extends Model
     {
         parent::boot();
 
-        // When a membership is deleted, also delete its invoices (soft or force accordingly)
+        // Preserve invoices: do not modify related invoices on membership delete
         static::deleting(function ($membership) {
-            $isForceDeleting = method_exists($membership, 'isForceDeleting') && $membership->isForceDeleting();
-
-            $membership->invoices()->withTrashed()->get()->each(function ($invoice) use ($isForceDeleting) {
-                // Apply teacher wallet reversal rules before deleting the invoice
-                try {
-                    $service = new \App\Services\TeacherMembershipPaymentService();
-                    $service->reverseInvoicePayments($invoice);
-                } catch (\Exception $e) {
-                    // continue even if reversal fails
-                }
-                if ($isForceDeleting) {
-                    $invoice->forceDelete();
-                } else {
-                    if ($invoice->trashed()) return;
-                    $invoice->delete();
-                }
-            });
+            // Intentionally left blank to keep invoice->membership_id for history
         });
     }
 }

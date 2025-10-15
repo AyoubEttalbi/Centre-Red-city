@@ -41,7 +41,8 @@ class Invoice extends Model
     // Relationship with Membership (assuming it exists)
     public function membership()
     {
-        return $this->belongsTo(Membership::class , 'membership_id');
+        // Include soft-deleted memberships so invoice can still access offer via membership
+        return $this->belongsTo(Membership::class, 'membership_id')->withTrashed();
     }
 
     public function creator()
