@@ -41,7 +41,7 @@ const InvoicesForm = ({
     StudentMemberships = [],
     studentId,
 }) => {
-    
+
     console.log(data);
     const today = new Date();
     const todayFormatted = formatDateToYYYYMMDD(today);
@@ -92,7 +92,7 @@ const InvoicesForm = ({
     const [isTypingTotal, setIsTypingTotal] = useState(false);
     // Track if user manually overrode the computed total
     const [totalOverridden, setTotalOverridden] = useState(false);
-    
+
     // Track invalid input attempts
     const [showInvalidInput, setShowInvalidInput] = useState(false);
     // Track server-side error (French-friendly)
@@ -121,12 +121,7 @@ const InvoicesForm = ({
             months: data?.months || 1,
             billDate: data?.billDate
                 ? String(data.billDate).slice(0, 10)
-                : (() => {
-                    const currentYear = today.getFullYear();
-                    const currentMonth = today.getMonth();
-                    const startYear = currentMonth >= 7 ? currentYear : currentYear - 1;
-                    return `${startYear}-08-01`;
-                })(),
+                : todayFormatted,
             creationDate: data?.creationDate ? String(data.creationDate).slice(0, 10) : todayFormatted,
             totalAmount: data?.totalAmount || 0,
             amountPaid: data?.amountPaid || 0,
@@ -146,16 +141,16 @@ const InvoicesForm = ({
         const months = [];
         const currentYear = today.getFullYear();
         const currentMonth = today.getMonth(); // 0-based
-        
+
         // Moroccan school year: August (month 7) to July (month 6)
         // If we're in August or later, start from current year
         // If we're before August, start from previous year
         const startYear = currentMonth >= 7 ? currentYear : currentYear - 1;
-        
+
         for (let i = 0; i < 12; i++) {
             const monthIndex = (7 + i) % 12; // Start from August (7), wrap around to July (6)
             const year = startYear + Math.floor((7 + i) / 12);
-            
+
             const date = new Date(year, monthIndex, 1);
             const monthNames = [
                 'Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin',
@@ -183,7 +178,7 @@ const InvoicesForm = ({
                     if (Array.isArray(parsed)) {
                         return parsed;
                     }
-                } catch (e) {}
+                } catch (e) { }
             } else if (Array.isArray(data.selected_months)) {
                 return data.selected_months;
             }
@@ -202,19 +197,12 @@ const InvoicesForm = ({
             const billMonth = data.billDate.slice(0, 7);
             return [billMonth];
         }
-        // 6. For create mode: default to current month if it's in the school year, otherwise first month of school year
+        // 6. For create mode: default to current month
         if (type === 'create') {
-            const currentMonth = today.getMonth(); // 0-based
+            // Always default to the current month
             const currentYear = today.getFullYear();
-            
-            // Check if current month is in the school year (August to July)
-            if (currentMonth >= 7) {
-                // We're in August or later, use current month
-                return [`${currentYear}-${String(currentMonth + 1).padStart(2, "0")}`];
-            } else {
-                // We're before August, use August of current year
-                return [`${currentYear}-08`];
-            }
+            const currentMonth = today.getMonth(); // 0-based
+            return [`${currentYear}-${String(currentMonth + 1).padStart(2, "0")}`];
         }
         // 7. Fallback to first month of school year
         const currentYear = today.getFullYear();
@@ -354,10 +342,7 @@ const InvoicesForm = ({
             }
         }
         // Default to first month of current school year if no months selected
-        const currentYear = today.getFullYear();
-        const currentMonth = today.getMonth();
-        const startYear = currentMonth >= 7 ? currentYear : currentYear - 1;
-        return `${startYear}-08-01`;
+        return todayFormatted;
     };
 
     const calculateEndDate = () => {
@@ -413,7 +398,7 @@ const InvoicesForm = ({
     };
 
     const onSubmit = (formData) => {
-       
+
         if (formData.membership_id === "") {
             delete formData.membership_id;
         } else if (typeof formData.membership_id === "string" && /^\d+$/.test(formData.membership_id)) {
@@ -439,11 +424,11 @@ const InvoicesForm = ({
             setServerError("Les mois sélectionnés doivent être consécutifs.");
             return;
         }
-    // Ensure amounts are numbers and recompute rest from totalAmount - amountPaid
-    formData.totalAmount = Math.round(Number(formData.totalAmount || 0));
-    formData.amountPaid = Math.round(Number(formData.amountPaid || 0));
-    // Always compute rest server-side style: total minus paid
-    formData.rest = Math.round(formData.totalAmount - formData.amountPaid);
+        // Ensure amounts are numbers and recompute rest from totalAmount - amountPaid
+        formData.totalAmount = Math.round(Number(formData.totalAmount || 0));
+        formData.amountPaid = Math.round(Number(formData.amountPaid || 0));
+        // Always compute rest server-side style: total minus paid
+        formData.rest = Math.round(formData.totalAmount - formData.amountPaid);
         formData.partialMonthAmount = Math.round(partialMonthAmount); // Use the calculated value
 
         // Debug logging
@@ -545,16 +530,16 @@ const InvoicesForm = ({
     // Handle amountPaid input change with debouncing and validation
     const handleAmountPaidChange = (e) => {
         setIsTypingAmountPaid(true);
-        
+
         // Allow only numbers, decimal point, and empty string
         const value = e.target.value;
         const isValidInput = /^[0-9]*\.?[0-9]*$/.test(value);
-        
+
         if (isValidInput || value === '') {
             // Update the form value
             setValue("amountPaid", value);
             setShowInvalidInput(false);
-            
+
             // Debounced update of rest amount
             setTimeout(() => {
                 if (!isTypingAmountPaid) {
@@ -723,7 +708,7 @@ const InvoicesForm = ({
                                                             value={membership.id}
                                                             className={
                                                                 membership.payment_status !==
-                                                                "paid"
+                                                                    "paid"
                                                                     ? "bg-amber-50 font-medium"
                                                                     : ""
                                                             }
@@ -864,34 +849,34 @@ const InvoicesForm = ({
                                                                     {partialMonthAmount} DH
                                                                 </span>
                                                                 {" "}
-                                                                    (<span className="font-medium">{(() => {
-                                                                        // Compute remaining days based on the watched billDate
-                                                                        const bd = watchedBillDate || effectiveFormatted;
-                                                                        let billDateObj = null;
-                                                                        try {
-                                                                            const ds = String(bd).slice(0, 10);
-                                                                            const parts = ds.split('-').map(Number);
-                                                                            if (parts.length === 3 && parts.every((n) => Number.isFinite(n))) {
-                                                                                billDateObj = new Date(parts[0], parts[1] - 1, parts[2]);
-                                                                            }
-                                                                        } catch (e) {
-                                                                            billDateObj = null;
+                                                                (<span className="font-medium">{(() => {
+                                                                    // Compute remaining days based on the watched billDate
+                                                                    const bd = watchedBillDate || effectiveFormatted;
+                                                                    let billDateObj = null;
+                                                                    try {
+                                                                        const ds = String(bd).slice(0, 10);
+                                                                        const parts = ds.split('-').map(Number);
+                                                                        if (parts.length === 3 && parts.every((n) => Number.isFinite(n))) {
+                                                                            billDateObj = new Date(parts[0], parts[1] - 1, parts[2]);
                                                                         }
-                                                                        if (!billDateObj) {
-                                                                            const parsed = new Date(bd);
-                                                                            if (!isNaN(parsed.getTime())) billDateObj = parsed;
-                                                                        }
-                                                                        if (!billDateObj) billDateObj = effectiveDate;
-                                                                        const daysInMonth = new Date(billDateObj.getFullYear(), billDateObj.getMonth() + 1, 0).getDate();
-                                                                        return Math.ceil(daysInMonth - billDateObj.getDate());
-                                                                    })()}</span> jours restants dans le mois courant, calculés à partir du {(() => {
-                                                                        const bd = watchedBillDate || effectiveFormatted;
-                                                                        try {
-                                                                            const d = new Date(bd);
-                                                                            if (!isNaN(d.getTime())) return d.toLocaleDateString('fr-FR');
-                                                                        } catch (e) {}
-                                                                        return effectiveDate.toLocaleDateString('fr-FR');
-                                                                    })()})
+                                                                    } catch (e) {
+                                                                        billDateObj = null;
+                                                                    }
+                                                                    if (!billDateObj) {
+                                                                        const parsed = new Date(bd);
+                                                                        if (!isNaN(parsed.getTime())) billDateObj = parsed;
+                                                                    }
+                                                                    if (!billDateObj) billDateObj = effectiveDate;
+                                                                    const daysInMonth = new Date(billDateObj.getFullYear(), billDateObj.getMonth() + 1, 0).getDate();
+                                                                    return Math.ceil(daysInMonth - billDateObj.getDate());
+                                                                })()}</span> jours restants dans le mois courant, calculés à partir du {(() => {
+                                                                    const bd = watchedBillDate || effectiveFormatted;
+                                                                    try {
+                                                                        const d = new Date(bd);
+                                                                        if (!isNaN(d.getTime())) return d.toLocaleDateString('fr-FR');
+                                                                    } catch (e) { }
+                                                                    return effectiveDate.toLocaleDateString('fr-FR');
+                                                                })()})
                                                             </p>
                                                         </div>
                                                     </div>
@@ -901,7 +886,7 @@ const InvoicesForm = ({
                                     </>
                                 )}
                             </>
-                        
+
                         )}
                     </div>
                 </div>
@@ -1049,11 +1034,10 @@ const InvoicesForm = ({
                                         onChange={handleAmountPaidChange}
                                         onFocus={handleAmountPaidFocus}
                                         onBlur={handleAmountPaidBlur}
-                                        className={`block w-full p-2 pr-10 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                                            showInvalidInput 
-                                                ? 'border-red-300 bg-red-50' 
-                                                : 'border-gray-300'
-                                        }`}
+                                        className={`block w-full p-2 pr-10 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${showInvalidInput
+                                            ? 'border-red-300 bg-red-50'
+                                            : 'border-gray-300'
+                                            }`}
                                     />
 
                                     {/* Button with Icon */}
@@ -1125,9 +1109,8 @@ const InvoicesForm = ({
                 <button
                     type="submit"
                     disabled={loading || invalidPartialAndCurrentMonth}
-                    className={`px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                        loading || invalidPartialAndCurrentMonth ? "opacity-70 cursor-not-allowed" : ""
-                    }`}
+                    className={`px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 ${loading || invalidPartialAndCurrentMonth ? "opacity-70 cursor-not-allowed" : ""
+                        }`}
                 >
                     {loading ? (
                         <div className="flex items-center justify-center">
