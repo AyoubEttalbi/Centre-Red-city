@@ -424,7 +424,7 @@ protected function transformStudentData($student)
                 'billingDate' => 'required|date',
                 'address' => 'nullable|string',
                 'guardianNumber' => 'nullable|string|max:255',
-                'guardianName' => 'nullable|string|max:255',
+                'guardianName' => 'required|string|max:255',
                 'CIN' => 'nullable|string|max:50|unique:students,CIN',
                 'phoneNumber' => 'nullable|string|max:20',
                 'email' => 'nullable|string|email|max:255|unique:students,email',
@@ -691,6 +691,27 @@ protected function transformStudentData($student)
             'updated_at' => $promotion->updated_at,
         ] : null;
 
+        // Full academic history: all year snapshots (level X with date X) for clean history timeline
+        $promotionsHistory = \App\Models\StudentPromotion::with(['level', 'class'])
+            ->where('student_id', $student->id)
+            ->orderBy('school_year', 'desc')
+            ->get()
+            ->map(function ($p) {
+                return [
+                    'id' => $p->id,
+                    'school_year' => $p->school_year,
+                    'year_label' => $p->year_label,
+                    'level_id' => $p->level_id,
+                    'level_name' => $p->level ? $p->level->name : null,
+                    'class_id' => $p->class_id,
+                    'class_name' => $p->class ? $p->class->name : null,
+                    'is_promoted' => $p->is_promoted,
+                    'notes' => $p->notes,
+                    'created_at' => $p->created_at,
+                    'updated_at' => $p->updated_at,
+                ];
+            });
+
         // Format the student data with new disease fields
         $studentData = [
             'id' => $student->id,
@@ -762,6 +783,7 @@ protected function transformStudentData($student)
         return Inertia::render('Menu/SingleStudentPage', [
             'student' => $studentData,
             'movements' => $movements,
+            'promotionsHistory' => $promotionsHistory,
             'Alllevels' => $levels,
             'Allclasses' => $classes,
             'Allschools' => $schools,
@@ -803,7 +825,7 @@ protected function transformStudentData($student)
                 'billingDate' => 'required|date',
                 'address' => 'nullable|string',
                 'guardianNumber' => 'nullable|string|max:255',
-                'guardianName' => 'nullable|string|max:255',
+                'guardianName' => 'required|string|max:255',
                 'CIN' => 'nullable|string|max:50|unique:students,CIN,' . $student->id,
                 'phoneNumber' => 'nullable|string|max:20',
                 'email' => 'nullable|string|email|max:255|unique:students,email,' . $student->id,

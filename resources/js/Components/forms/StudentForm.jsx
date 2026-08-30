@@ -63,7 +63,10 @@ const schema = z
                 { message: "Le numéro doit commencer par 5, 6, 7 ou 8 et comporter 9 chiffres." }
             )
             .transform((val) => val.replace(/^\+212/, "")),
-        guardianName: z.string().max(255, { message: "Nom du tuteur trop long (255 caractères max)" }).optional(),
+        guardianName: z
+            .string()
+            .min(1, { message: "Le nom du tuteur est requis !" })
+            .max(255, { message: "Nom du tuteur trop long (255 caractères max)" }),
         CIN: z.any().optional(),
         phoneNumber: z
             .string()
@@ -453,6 +456,7 @@ const StudentForm = ({ type, data, levels, classes, schools, setOpen }) => {
                     register={register}
                     error={errors.guardianName}
                     defaultValue={data?.guardianName}
+                    required
                 />
             </div>
             <span className="text-xs text-gray-400 font-medium">
@@ -682,6 +686,7 @@ const StudentForm = ({ type, data, levels, classes, schools, setOpen }) => {
                 </div>
                 <div className="flex flex-col gap-2 w-full">
                     <label className="text-xs text-gray-600">Statut</label>
+                    {/* Reactivating a student keeps their last level/class (no clearing on status change) — reassign manually via Niveau/Classe fields */}
                     <Select
                         value={selectedStatus}
                         onValueChange={(value) => {

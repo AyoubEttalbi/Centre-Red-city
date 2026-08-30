@@ -16,6 +16,7 @@ class SchoolYear extends Model
      */
     protected $fillable = [
         'year',
+        'year_label',
         'name',
         'ended_at',
         'statistics',

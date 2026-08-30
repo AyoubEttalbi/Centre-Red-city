@@ -7,10 +7,14 @@ const InputField = ({
     defaultValue,
     error,
     inputProps,
+    required,
 }) => {
     return (
         <div className="flex flex-col gap-2 w-full ">
-            <label className="text-xs text-gray-500">{label}</label>
+            <label className="text-xs text-gray-500">
+                {label}
+                {required && <span className="text-red-500"> *</span>}
+            </label>
             <input
                 type={type}
                 step={step}
@@ -18,7 +22,7 @@ const InputField = ({
                 className="mt-1 block w-full rounded-md ring-[1.5px] border-none ring-gray-300  p-2  text-sm  focus:border-black focus:ring-black pr-10"
                 {...inputProps}
                 defaultValue={defaultValue}
-                min={0}
+                min={type === "number" || type === "date" ? (inputProps?.min ?? 0) : undefined}
             />
             {/* Handle both string and object error types */}
             {error && (

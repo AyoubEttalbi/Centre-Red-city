@@ -19,6 +19,7 @@ class StudentPromotion extends Model
         'class_id',
         'level_id',
         'school_year',
+        'year_label',
         'is_promoted',
         'notes',
     ];

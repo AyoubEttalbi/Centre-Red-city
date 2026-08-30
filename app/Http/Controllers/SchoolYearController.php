@@ -9,16 +9,29 @@ use App\Models\Level;
 use App\Models\Membership;
 use App\Models\SchoolYear;
 use App\Models\Assistant;
-use App\Models\ClassTimetable;
-use App\Models\ClassModel;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use Inertia\Inertia;
 
 class SchoolYearController extends Controller
 {
+    /**
+     * Moroccan school year label: Sept (9) – Jun (8)
+     * month 9–12 → "{Y}/{Y+1}", month 1–8 → "{Y-1}/{Y}"
+     */
+    private function academicYearLabel($date): string
+    {
+        $d = Carbon::parse($date);
+        $m = (int) $d->format('n');
+        $y = (int) $d->format('Y');
+        if ($m >= 9 && $m <= 12) {
+            return $y . '/' . ($y + 1);
+        }
+        return ($y - 1) . '/' . $y;
+    }
+
     /**
      * Handle the school year transition process
      *
@@ -28,74 +41,149 @@ class SchoolYearController extends Controller
     public function transition(Request $request)
     {
         try {
+            // Calendar year of this transition execution — used consistently for
+            // SchoolYear.year and student_promotions.school_year.
+            // This is the calendar year, not the pedagogical 20XX/20XX+1 label (name/year_label holds label).
+            $transitionYear = Carbon::now()->year;
+            $transitionLabel = $this->academicYearLabel(Carbon::now());
+
+            // Idempotency guard: Inertia redirect flow — do not abort(422)
+            if (Student::where('status', 'active')->count() === 0) {
+                return redirect()->back()->with('error', 'Aucun élève actif — la transition a déjà été effectuée pour cette année.');
+            }
+
             DB::beginTransaction();
 
-            // Create a record of the completed school year
-            $archivedYear = $this->archiveSchoolYearData();
+            // Create a record of the completed school year (snapshot BEFORE mutations)
+            $archivedYear = $this->archiveSchoolYearData($transitionYear, $transitionLabel);
 
-            // 1. Reset all teacher class assignments and remove from their profiles
+            // Hook for rollback regression test (testing only): when ?force_fail=1 the TRUNCATE vs delete bug would previously leave orphaned archive row
+            if ($request->input('force_fail') && app()->environment('testing')) {
+                throw new \Exception('Forced failure for rollback test');
+            }
+
+            // 1. Snapshot + reset student level/class assignments (levelId + classId -> null) + bulk movements
+            $clearedCount = $this->resetStudentAssignments($transitionYear, $transitionLabel);
+
+            // 2. Reset all teacher class assignments and remove from their profiles
             $teacherCount = $this->resetTeacherAssignments();
 
-            // 2. Soft delete all current memberships (archive them)
+            // 3. Soft delete all current memberships (archive them)
             $membershipCount = $this->archiveMemberships();
 
-            // 3. Promote students to the next grade level (if applicable)
-            [$promotedCount, $graduatedCount] = $this->promoteStudents();
-            
-            // 4. Set all students to inactive
+            // 4. Deactivate teacher membership payments (is_active => false) for dashboard/stat correctness.
+            $deactivatedPaymentCount = $this->deactivateTeacherPayments();
+
+            // 5. Set all students to inactive — bulk (movements already inserted in step 1)
             $inactiveStudentCount = $this->setStudentsInactive();
-            
-            // 5. Set all teachers to inactive
+
+            // 6. Set all teachers to inactive
             $inactiveTeacherCount = $this->setTeachersInactive();
-            
-            // 6. Set all assistants to inactive
+
+            // 7. Set all assistants to inactive
             $inactiveAssistantCount = $this->setAssistantsInactive();
 
             DB::commit();
 
-            $message = "School year transition completed successfully: 
-                        {$teacherCount} teacher assignments reset, 
-                        {$membershipCount} memberships archived, 
-                        {$promotedCount} students promoted, 
-                        {$graduatedCount} students graduated,
-                        {$inactiveStudentCount} students set to inactive,
-                        {$inactiveTeacherCount} teachers set to inactive,
-                        {$inactiveAssistantCount} assistants set to inactive.
-                        All data has been preserved in the database for historical records.";
+            $message = "Année scolaire {$transitionLabel} clôturée : "
+                . "{$clearedCount} élèves réinitialisés (niveau et classe retirés), "
+                . "{$teacherCount} affectations enseignants réinitialisées, "
+                . "{$membershipCount} abonnements archivés, "
+                . "{$deactivatedPaymentCount} paiements enseignants désactivés, "
+                . "{$inactiveStudentCount} élèves passés en inactif, "
+                . "{$inactiveTeacherCount} enseignants passés en inactif, "
+                . "{$inactiveAssistantCount} assistants passés en inactif. "
+                . "Toutes les données ont été conservées pour l'historique (promotions enregistrées en {$transitionYear}, label {$transitionLabel}).";
 
             return redirect()->back()->with('success', $message);
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('School year transition failed: ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
-            
+
             return redirect()->back()->with('error', 'School year transition failed: ' . $e->getMessage());
         }
     }
 
     /**
-     * Clear student class assignments without promoting them
-     * 
-     * @return array [clearedCount, 0] - Second value kept for backward compatibility
+     * Snapshot + reset student level/class assignments for the new school year (batched).
+     * Chunked to keep query count independent of N. Upsert keeps admin is_promoted/notes on conflict.
+     *
+     * @param int $transitionYear Calendar year
+     * @param string $transitionLabel Academic label e.g. "2025/2026"
+     * @return int Number of students reset
      */
-    private function promoteStudents()
+    private function resetStudentAssignments(int $transitionYear, string $transitionLabel): int
     {
-        // Get all active students
-        $students = Student::where('status', 'active')->get();
+        $recordedBy = Auth::id();
+        $now = Carbon::now();
+        $nowStr = $now->toDateTimeString();
+        $nowDate = $now->toDateString();
+        $monthYear = $now->format('Y-m');
         $clearedCount = 0;
 
-        foreach ($students as $student) {
-            // Clear class assignment for all students
-            $student->classId = null;
-            $student->save();
-            $clearedCount++;
-            
-            Log::info("Student {$student->id} ({$student->firstName} {$student->lastName}) class assignment cleared. Level remains {$student->levelId}.");
+        Student::where('status', 'active')
+            ->select(['id', 'firstName', 'lastName', 'classId', 'levelId', 'schoolId', 'guardianName', 'guardianNumber', 'billingDate', 'assuranceAmount', 'assurance'])
+            ->chunkById(500, function ($students) use ($transitionYear, $transitionLabel, $recordedBy, $now, $nowStr, $nowDate, $monthYear, &$clearedCount) {
+                $promotionRows = [];
+                $movementRows = [];
+                foreach ($students as $s) {
+                    $promotionRows[] = [
+                        'student_id' => $s->id,
+                        'school_year' => $transitionYear,
+                        'class_id' => $s->classId,
+                        'level_id' => $s->levelId,
+                        'year_label' => $transitionLabel,
+                        'is_promoted' => 1,
+                        'notes' => null,
+                        'created_at' => $nowStr,
+                        'updated_at' => $nowStr,
+                    ];
+                    $movementRows[] = [
+                        'student_id' => $s->id,
+                        'movement_type' => 'abandoned',
+                        'movement_date' => $nowDate,
+                        'month_year' => $monthYear,
+                        'school_id' => $s->schoolId,
+                        'class_id' => $s->classId,
+                        'level_id' => $s->levelId,
+                        'student_first_name' => $s->firstName,
+                        'student_last_name' => $s->lastName,
+                        'student_full_name' => $s->firstName . ' ' . $s->lastName,
+                        'guardian_name' => $s->guardianName,
+                        'guardian_number' => $s->guardianNumber,
+                        'reason' => "Année scolaire clôturée {$transitionLabel}",
+                        'previous_status' => 'active',
+                        'new_status' => 'inactive',
+                        'billing_date' => $s->billingDate,
+                        'assurance_amount' => $s->assuranceAmount,
+                        'has_assurance' => (bool) $s->assurance,
+                        'recorded_by' => $recordedBy,
+                        'notes' => "Transition année scolaire {$transitionLabel}",
+                        'created_at' => $nowStr,
+                        'updated_at' => $nowStr,
+                        'deleted_at' => null,
+                    ];
+                    $clearedCount++;
+                }
+                if (!empty($promotionRows)) {
+                    DB::table('student_promotions')->upsert(
+                        $promotionRows,
+                        ['student_id', 'school_year'],
+                        ['class_id', 'level_id', 'year_label', 'updated_at']
+                    );
+                }
+                if (!empty($movementRows)) {
+                    DB::table('student_movements')->insert($movementRows);
+                }
+            });
+
+        if ($clearedCount > 0) {
+            Student::where('status', 'active')->update(['classId' => null, 'levelId' => null]);
         }
 
-        Log::info("School year transition: {$clearedCount} student class assignments cleared without level changes");
-        
-        // Return array with same structure for backward compatibility
-        return [$clearedCount, 0];
+        Log::info("School year transition: {$clearedCount} student assignments reset (level + class nulled) + movements inserted for year {$transitionYear}/{$transitionLabel}");
+
+        return $clearedCount;
     }
 
     /**
@@ -105,115 +193,62 @@ class SchoolYearController extends Controller
      */
     private function resetTeacherAssignments()
     {
-        // Get all teachers
-        $teachers = Teacher::all();
-        $totalResetCount = 0;
-        
-        // First clear the pivot table directly for efficiency
         $pivotCount = DB::table('classes_teacher')->count();
-        DB::table('classes_teacher')->truncate();
-        Log::info("Truncated classes_teacher pivot table, removed {$pivotCount} relationships");
-        
-        foreach ($teachers as $teacher) {
-            // For logging purposes, count previous assignments if possible
-            $classCount = 0;
-            
-            if (method_exists($teacher, 'classes')) {
-                // The relationships have already been detached by truncating the pivot table
-                // This is just to note in the log how many classes each teacher had
-                $classCount = $teacher->classes()->count();
-                Log::info("Teacher {$teacher->id} ({$teacher->first_name} {$teacher->last_name}): {$classCount} class assignments reset");
-            }
-            
-            // Reset subjects relationship if applicable
-            if (method_exists($teacher, 'subjects')) {
-                $subjectCount = $teacher->subjects()->count();
-                // We don't detach subjects as teachers still teach the same subjects
-                // But we log for information
-                Log::info("Teacher {$teacher->id} maintains {$subjectCount} subject assignments");
-            }
-            
-            // Update the teacher's record to reflect the change
-            $teacher->updated_at = now();
-            $teacher->save();
-            
-            $totalResetCount += $classCount;
-        }
-        
-        Log::info("School year transition: {$totalResetCount} teacher-class assignments reset");
-        
-        return $totalResetCount;
+        DB::table('classes_teacher')->delete();
+        Classes::query()->update(['number_of_teachers' => 0]);
+        Log::info("School year transition: {$pivotCount} teacher-class assignments reset, number_of_teachers=0 (subject_teacher preserved)");
+
+        return $pivotCount;
     }
 
     /**
-     * Archive (soft delete) current memberships
+     * Archive (soft delete) current memberships — batched (2 bulk queries, no per-row logs)
      * 
      * @return int Number of memberships archived
      */
     private function archiveMemberships()
     {
-        // Get all active memberships - using correct field names from the model
-        $memberships = Membership::whereNull('deleted_at')
+        $now = Carbon::now()->toDateTimeString();
+        $baseQuery = Membership::whereNull('deleted_at')
             ->where(function($query) {
                 $query->whereNull('end_date')->orWhere('end_date', '>', now());
-            })
-            ->get();
-        $count = 0;
+            });
 
-        foreach ($memberships as $membership) {
-            // Mark membership as completed
-            $membership->end_date = Carbon::now();
-            $membership->is_active = false; // Mark as inactive if the field exists
-            $membership->save();
-            
-            // Soft delete the membership (it will still be in the database but won't appear in queries)
-            $membership->delete();
-            $count++;
-            
-            Log::info("Membership {$membership->id} for student {$membership->student_id} marked as completed and archived");
+        $ids = (clone $baseQuery)->pluck('id')->toArray();
+        $count = count($ids);
+
+        if ($count > 0) {
+            // Two bulk queries on explicit IDs — safe, Membership::deleting hook is empty
+            Membership::whereIn('id', $ids)->update(['end_date' => $now, 'is_active' => false]);
+            Membership::whereIn('id', $ids)->update(['deleted_at' => $now]);
         }
 
-        // Update all class membership counts
-        $this->updateClassMembershipCounts();
+        Classes::query()->update(['number_of_students' => 0]);
 
-        Log::info("School year transition: {$count} memberships archived");
-        
+        Log::info("School year transition: {$count} memberships archived, number_of_students=0");
+
         return $count;
-    }
-    
-    /**
-     * Update class membership counts after archiving memberships
-     */
-    private function updateClassMembershipCounts()
-    {
-        $classes = Classes::all();
-        
-        foreach ($classes as $class) {
-            // Reset the count to 0 since all active memberships were archived
-            $class->number_of_students = 0;
-            $class->save();
-            
-            Log::info("Class {$class->id} ({$class->name}) membership count reset to 0");
-        }
     }
 
     /**
      * Archive completed school year data
-     * 
+     *
+     * @param int|null $transitionYear Calendar year of transition (defaults to now()->year)
+     * @param string|null $transitionLabel Academic label e.g. "2025/2026"
      * @return SchoolYear The archived school year record
      */
-    private function archiveSchoolYearData()
+    private function archiveSchoolYearData(?int $transitionYear = null, ?string $transitionLabel = null)
     {
-        // Create a record of the completed school year
+        $transitionYear = $transitionYear ?? Carbon::now()->year;
+        $transitionLabel = $transitionLabel ?? $this->academicYearLabel(Carbon::now());
         $schoolYear = new SchoolYear();
-        $schoolYear->year = Carbon::now()->year;
+        $schoolYear->year = $transitionYear;
+        $schoolYear->year_label = $transitionLabel;
         $schoolYear->ended_at = Carbon::now();
-        $schoolYear->name = 'School Year ' . Carbon::now()->year . '-' . (Carbon::now()->year + 1);
+        $schoolYear->name = 'Année scolaire ' . $transitionLabel;
         
-        // Get statistics for the archived year
         $statistics = [
             'active_students' => Student::where('status', 'active')->count(),
-            'graduated_students' => Student::where('status', 'graduated')->count(),
             'teachers' => Teacher::count(),
             'classes' => Classes::count(),
             'active_memberships' => Membership::whereNull('deleted_at')
@@ -224,12 +259,10 @@ class SchoolYearController extends Controller
             'levels' => Level::count(),
         ];
         
-        // Add more detailed statistics
         $statistics['students_per_level'] = $this->getStudentsPerLevel();
         $statistics['teachers_per_subject'] = $this->getTeachersPerSubject();
         $statistics['classes_per_level'] = $this->getClassesPerLevel();
         
-        // Store statistics in the school year record
         $schoolYear->statistics = json_encode($statistics);
         $schoolYear->save();
         
@@ -265,8 +298,6 @@ class SchoolYearController extends Controller
      */
     private function getTeachersPerSubject()
     {
-        // This implementation depends on your specific model relationships
-        // Here's a placeholder that you can customize based on your database structure
         return DB::table('subject_teacher')
             ->select('subject_id', DB::raw('count(*) as teacher_count'))
             ->groupBy('subject_id')
@@ -311,10 +342,8 @@ class SchoolYearController extends Controller
     public function setupPromotions(Request $request)
     {
         try {
-            // Add debug log
             Log::info('setupPromotions method called');
             
-            // Check if we have promotion data in the request
             if ($request->has('promotions')) {
                 Log::info('Processing promotion data from form submission');
                 $promotionsData = $request->input('promotions');
@@ -322,24 +351,22 @@ class SchoolYearController extends Controller
                 
                 foreach ($promotionsData as $promotion) {
                     if (!isset($promotion['student_id'])) {
-                        continue; // Skip invalid entries
+                        continue;
                     }
                     
                     $studentId = $promotion['student_id'];
                     $isPromoted = isset($promotion['is_promoted']) ? (bool)$promotion['is_promoted'] : true;
                     $notes = $promotion['notes'] ?? '';
                     
-                    // Get student information for logging
                     $student = Student::find($studentId);
                     if (!$student) {
                         Log::warning("Student ID {$studentId} not found");
                         continue;
                     }
                     
-                    // For debugging: log each student we're processing
                     Log::info("Processing student ID: {$student->id}, Name: {$student->firstName} {$student->lastName}, Promotion Status: " . ($isPromoted ? 'Promoted' : 'Not Promoted'));
                     
-                    // Update or create promotion record
+                    $label = $this->academicYearLabel(Carbon::now());
                     DB::table('student_promotions')
                         ->updateOrInsert(
                             [
@@ -349,6 +376,7 @@ class SchoolYearController extends Controller
                             [
                                 'class_id' => $student->classId,
                                 'level_id' => $student->levelId,
+                                'year_label' => $label,
                                 'is_promoted' => $isPromoted ? 1 : 0,
                                 'notes' => $notes,
                                 'created_at' => now(),
@@ -363,20 +391,14 @@ class SchoolYearController extends Controller
                 return redirect()->back()->with('success', "Successfully set up promotion records for {$count} students.");
             }
             
-            // If no promotion data in request, this is a GET request to show the form
-            // Get all active students
             $students = Student::where('status', 'active')->get();
-            $count = 0;
             
-            // Log number of students found
             Log::info('Found ' . $students->count() . ' active students');
             
-            // Get the current student data with promotions for display in the form
             $studentsWithPromotions = Student::with(['promotions' => function($query) {
                 $query->where('school_year', Carbon::now()->year);
             }])->where('status', 'active')->get();
             
-            // Get only the promotion data to send back
             $promotionData = [];
             foreach ($studentsWithPromotions as $student) {
                 if ($student->promotions->isNotEmpty()) {
@@ -409,7 +431,11 @@ class SchoolYearController extends Controller
                 'notes' => 'nullable|string|max:500'
             ]);
             
-            // Update or create the promotion record
+            $existing = DB::table('student_promotions')
+                ->where('student_id', $validated['student_id'])
+                ->where('school_year', Carbon::now()->year)
+                ->first();
+            $label = $existing->year_label ?? $this->academicYearLabel(Carbon::now());
             DB::table('student_promotions')
                 ->updateOrInsert(
                     [
@@ -417,6 +443,7 @@ class SchoolYearController extends Controller
                         'school_year' => Carbon::now()->year
                     ],
                     [
+                        'year_label' => $label,
                         'is_promoted' => $validated['is_promoted'],
                         'notes' => $validated['notes'] ?? '',
                         'updated_at' => now()
@@ -434,70 +461,61 @@ class SchoolYearController extends Controller
     }
     
     /**
-     * Set all students to inactive status
-     * 
+     * Deactivate teacher membership payments for new-year stat correctness.
+     *
+     * @return int Number of payments deactivated
+     */
+    private function deactivateTeacherPayments(): int
+    {
+        $count = \App\Models\TeacherMembershipPayment::where('is_active', true)->count();
+        \App\Models\TeacherMembershipPayment::where('is_active', true)->update(['is_active' => false]);
+        Log::info("School year transition: {$count} teacher_membership_payments deactivated (is_active => false)");
+        return $count;
+    }
+
+    /**
+     * Set all students to inactive status — bulk (movements already inserted in resetStudentAssignments).
+     *
      * @return int Number of students set to inactive
      */
-    private function setStudentsInactive()
+    private function setStudentsInactive(): int
     {
-        // Get active students
-        $students = Student::where('status', 'active')->get();
-        $count = 0;
-        
-        foreach ($students as $student) {
-            $student->status = 'inactive';
-            $student->save();
-            $count++;
-            
-            Log::info("Student {$student->id} ({$student->firstName} {$student->lastName}) status set to inactive.");
+        $count = Student::where('status', 'active')->count();
+        if ($count > 0) {
+            Student::where('status', 'active')->update(['status' => 'inactive']);
         }
-        
         Log::info("School year transition: {$count} students set to inactive status");
-        
+
         return $count;
     }
     
     /**
-     * Set all teachers to inactive status
+     * Set all teachers to inactive status — Teacher boot has created/updated/deleted hooks for number_of_teachers,
+     * but we bulk-set number_of_teachers=0 in resetTeacherAssignments, so bulk update here is safe (no meaningful hook).
      * 
      * @return int Number of teachers set to inactive
      */
     private function setTeachersInactive()
     {
-        // Get active teachers
-        $teachers = Teacher::where('status', 'active')->get();
-        $count = 0;
-        
-        foreach ($teachers as $teacher) {
-            $teacher->status = 'inactive';
-            $teacher->save();
-            $count++;
-            
-            Log::info("Teacher {$teacher->id} ({$teacher->first_name} {$teacher->last_name}) status set to inactive.");
+        $count = Teacher::where('status', 'active')->count();
+        if ($count > 0) {
+            Teacher::where('status', 'active')->update(['status' => 'inactive']);
         }
-        
         Log::info("School year transition: {$count} teachers set to inactive status");
         
         return $count;
     }
     
     /**
-     * Set all assistants to inactive status
+     * Set all assistants to inactive status — Assistant has no boot hooks, bulk update is safe.
      * 
      * @return int Number of assistants set to inactive
      */
     private function setAssistantsInactive()
     {
-        // Get active assistants
-        $assistants = Assistant::where('status', 'active')->get();
-        $count = 0;
-        
-        foreach ($assistants as $assistant) {
-            $assistant->status = 'inactive';
-            $assistant->save();
-            $count++;
-            
-            Log::info("Assistant {$assistant->id} ({$assistant->first_name} {$assistant->last_name}) status set to inactive.");
+        $count = Assistant::where('status', 'active')->count();
+        if ($count > 0) {
+            Assistant::where('status', 'active')->update(['status' => 'inactive']);
         }
         
         Log::info("School year transition: {$count} assistants set to inactive status");

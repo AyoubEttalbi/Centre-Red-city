@@ -5,9 +5,11 @@ import {
     ChevronRight,
     Info,
 } from "lucide-react";
-import { router } from "@inertiajs/react";
+import { router, usePage } from "@inertiajs/react";
+import Alert from "@/Components/PaymentsAndTransactions/Alert";
 
 function SchoolYearTransition() {
+    const { flash } = usePage().props;
     const [showModal, setShowModal] = useState(false);
     const [isProcessing, setIsProcessing] = useState(false);
     const [confirmStep, setConfirmStep] = useState(1);
@@ -43,16 +45,27 @@ function SchoolYearTransition() {
     };
 
     const steps = [
-        "Promouvoir les élèves au niveau supérieur (si marqués comme promus), avec réinitialisation des affectations de classe et marquage des diplômés",
-        "Les élèves non promus garderont leur niveau actuel mais leurs affectations de classe seront réinitialisées",
-        "Supprimer toutes les affectations de classe des profils enseignants (suppression douce pour conserver l'historique)",
-        "Archiver tous les abonnements étudiants actuels en les marquant comme terminés et en les supprimant doucement",
-        "Réinitialiser les effectifs de classe tout en préservant l'historique des données",
-        "Créer un enregistrement complet de l'année scolaire terminée avec des statistiques détaillées",
+        "Retirer niveau et classe de tous les élèves actifs pour réaffectation manuelle l'année prochaine (snapshot niveau/classe + date historisé dans student_promotions)",
+        "Supprimer toutes les affectations classes des enseignants (table classes_teacher, rollback-safe) et réinitialiser le compteur classes.number_of_teachers — matières conservées",
+        "Archiver tous les abonnements actifs (is_active=false, end_date=aujourd'hui, soft delete) — gardés pour l'historique",
+        "Désactiver les paiements enseignants actifs (teacher_membership_payments.is_active=false) pour isoler les stats de la nouvelle année",
+        "Passer élèves, enseignants et assistants actifs en inactif (réactivation manuelle requise)",
+        "Créer un enregistrement SchoolYear de l'année clôturée avec statistiques détaillées",
     ];
 
     return (
         <div className="bg-white p-4 rounded-md flex-1 m-4 mt-0 md:mt-4">
+            {/* Message flash de la transition (succès / erreur) */}
+            {flash?.message && (
+                <div className="mb-4">
+                    <Alert type="success" message={flash.message} />
+                </div>
+            )}
+            {flash?.error && (
+                <div className="mb-4">
+                    <Alert type="error" message={flash.error} />
+                </div>
+            )}
             <div className="flex items-center justify-between mb-8">
                 <div className="flex flex-row md:flex-row items-center gap-4 w-full md:w-auto">
                     <h1 className="font-semibold text-2xl">
@@ -68,11 +81,11 @@ function SchoolYearTransition() {
                             Clôturer l'année scolaire en cours
                         </h2>
                         <p className="text-gray-600 mt-1">
-                            Passez à la prochaine année scolaire en promouvant les
-                            élèves, en réinitialisant les affectations des
-                            enseignants et en archivant les abonnements actuels.
-                            Toutes les données seront conservées dans la base pour
-                            l'historique.
+                            Réinitialisez niveau et classe des élèves actifs,
+                            supprimez les affectations enseignants et archivez les
+                            abonnements pour démarrer la nouvelle année. Toutes
+                            les données restent en base pour l'historique
+                            (promotions enregistrées par année).
                         </p>
                     </div>
                     <button
@@ -144,14 +157,15 @@ function SchoolYearTransition() {
                                         </h4>
                                         <p className="text-sm text-red-700">
                                             Vous êtes sur le point de démarrer une
-                                            nouvelle année scolaire. Cela
-                                            réinitialisera les affectations des
-                                            enseignants, archivera les abonnements
-                                            et promouvra les élèves au niveau
-                                            supérieur. Les données seront
-                                            conservées dans la base, mais les
-                                            associations seront supprimées des
-                                            profils actifs.
+                                            nouvelle année scolaire. Cela retirera
+                                            niveau et classe de tous les élèves
+                                            actifs (réaffectation manuelle ensuite),
+                                            supprimera les affectations enseignants,
+                                            archivera les abonnements et désactivera
+                                            les paiements enseignants. Les données
+                                            resteront en base pour l'historique,
+                                            mais les associations actives seront
+                                            supprimées.
                                         </p>
                                     </div>
                                     <p className="text-sm text-gray-600 mb-2">
